@@ -1,160 +1,217 @@
 'use strict';
-/* Powerwave Services tracker - one-stop searchable view of all tracker data. Data shape: see build_data.py. */
+/* Powerwave Services tracker - simple lists (4-7 key columns), everything else in a tap-to-open detail panel. Data shape: see build_data.py. */
 let D=null;const app=document.getElementById('app');
 const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const TODAY=()=>{const d=new Date();d.setHours(0,0,0,0);return d};
-const pd=s=>{const m=/^(\d{4})-(\d\d)-(\d\d)/.exec(s||'');return m?new Date(+m[1],m[2]-1,+m[3]):null};
+const pd=s=>{let m=/^(\d{4})-(\d\d)-(\d\d)/.exec(s||'');if(m)return new Date(+m[1],m[2]-1,+m[3]);m=/^(\d{1,2})\/(\d{1,2})\/(\d{4})/.exec(s||'');return m?new Date(+m[3],m[1]-1,+m[2]):null};
 const days=(a,b)=>Math.round((b-a)/864e5);
-const usd=n=>n==null||isNaN(n)?'':'$'+n.toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2});
-const fmtD=s=>{const d=pd(s);return d?`${d.getMonth()+1}/${d.getDate()}/${d.getFullYear()}`:esc(s||'')};
+const blank=v=>v==null||(typeof v==='number'&&isNaN(v))||(Array.isArray(v)&&!v.length)||/^\s*(nan|none|null|—|-|n\/a)?\s*$/i.test(String(v));
+const usd=n=>n==null||isNaN(n)?'':'$'+Math.round(n).toLocaleString('en-US');
+const usd2=n=>n==null||isNaN(n)?'':'$'+n.toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2});
+const fD=s=>{if(blank(s))return '';const d=pd(String(s));return d&&/^\d{4}-\d\d-\d\d$|^\d{1,2}\/\d{1,2}\/\d{4}$/.test(String(s).trim())?d.toLocaleDateString('en-US',{month:'short',day:'numeric',year:'numeric'}):String(s)};
 const TAGC={JAN:'jan',MAY:'may',SEP:'sep'};
 const tagHTML=t=>t?`<span class="ctag ${TAGC[t]||''}">${t==='JAN'?'JAN · red':t==='MAY'?'MAY · blue':'SEP · green'}</span>`:'';
-const pathHTML=p=>p?`<span class="path" title="Dropbox/box path">${esc(p)}</span>`:'';
+const ORD=/\b(O[RSE]\d{6}|SR\d{6}|RS\d{6})\b/g;
+const oLink=no=>no?`<a href="#order=${esc(no)}" class="ord" data-o="${esc(no)}">${esc(no)}</a>`:'';
+const linkOrders=t=>esc(t).replace(ORD,m=>oLink(m));
+const typ=no=>({OR:'Rental',OE:'Exchange',OS:'Sale',SR:'Service',RS:'Service (RSR)'})[String(no).slice(0,2)]||'';
+const pill=(t,c)=>t?`<span class="pill ${c}">${esc(t)}</span>`:'';
+const isOn=r=>String(r.Status).startsWith('ON RENT');
+const stPill=r=>pill(isOn(r)?'On rent':r.Status==='RETURNED'?'Returned':/LIKELY/.test(r.Status)?'Likely returned':r.Status,isOn(r)?'red':r.Status==='RETURNED'?'green':'amber');
+const narrow=()=>window.matchMedia('(max-width:760px)').matches;
 
 /* ---------- rental math (live from today) ---------- */
-function rentalCalc(r){const out=pd(r['Out date']);const end=pd(r['Return/close date'])||(String(r.Status).startsWith('ON RENT')?TODAY():null);
- const d=out&&end?Math.max(1,days(out,end)):null;/* cheaper of daily×days or months×monthly+partial days */let spent=null,basis=r['Price basis'];
+function rentalCalc(r){const out=pd(r['Out date']);const end=pd(r['Return/close date'])||(isOn(r)?TODAY():null);
+ const d=out&&end?Math.max(1,days(out,end)):null;let spent=null,basis=r['Price basis'];
  if(r.Invoiced!=null)spent=r.Invoiced;
  else if(r['Net daily']!=null&&d!=null){const dl=r['Net daily'],mo=r['Net monthly']||dl*20;spent=Math.floor(d/28)*mo+Math.min((d%28)*dl,mo)}
  else if(r['Net daily']!=null)basis='rate known, return date unknown';
- return {days:d,spent,basis}}
+ return {days:d,spent,basis,est:r['Spend kind']!=='actual'}}
+let R=[],OI={};   // rentals with calc; order index
+function prep(){R=D.rentals.map((r,i)=>({...r,_i:i,_c:rentalCalc(r)}));OI={};
+ const get=no=>OI[no]||(OI[no]={no,o:null,lines:[]});
+ (D.orders||[]).forEach(o=>get(o.Order).o=o);R.forEach(r=>get(r.Order).lines.push(r));
+ Object.values(OI).forEach(x=>{const o=x.o||{},L=x.lines;const f=k=>L.map(r=>r[k]).find(v=>!blank(v)&&v!=='(unknown)');
+  x.type=o.Type||f('Type')||typ(x.no);x.who=(!blank(o['Ordered by'])&&o['Ordered by'])||f('Placed by')||f('Who (ordered by)')||'';
+  x.where=[f('Job'),f('Ship to')||o['Ship to']||f('Where (ship to / job)')].filter(Boolean).filter((v,i,a)=>a.indexOf(v)===i).join(' · ')||(o['Intellirent facility']?'Intellirent '+o['Intellirent facility']:'');
+  x.date=o['Order date']||o['Ship date']||L.map(r=>r['Out date']).filter(Boolean).sort()[0]||'';
+  x.actual=L.filter(r=>!r._c.est&&r._c.spent!=null).reduce((a,r)=>a+r._c.spent,0);x.estimate=L.filter(r=>r._c.est&&r._c.spent!=null).reduce((a,r)=>a+r._c.spent,0);
+  x.total=L.some(r=>r._c.spent!=null)?x.actual+x.estimate:(o['Invoice total']??o['Sale/misc total']??null);
+  x.status=L.some(isOn)?'On rent':o.Status||(L.length&&L.every(r=>r.Status==='RETURNED')?'Returned':o.Board||'');})}
 
-/* ---------- generic searchable / filterable / sortable table ---------- */
+/* ---------- simple list: search + <=3 filters (+ More filters), table on desktop, cards on phones ---------- */
 const state={};
-function tableView(key,rows,cols,opt={}){
- const st=state[key]||(state[key]={q:'',f:{},sort:opt.sort||null,dir:opt.dir||1});
- const id='t_'+key;const wrap=document.createElement('section');wrap.className='tv';
- const filt=(opt.filters||[]).map(c=>{const vals=[...new Set(rows.map(r=>String(colVal(r,c)??'')).filter(Boolean))].sort(Combo.numCmp);
-  return `<label class="fl"><span>${esc(c.label||c.k)}</span><select data-f="${esc(c.k)}"><option value="">All</option>${vals.map(v=>`<option ${st.f[c.k]===v?'selected':''}>${esc(v)}</option>`).join('')}</select></label>`}).join('');
- wrap.innerHTML=`${opt.title?`<h2>${esc(opt.title)}</h2>`:''}${opt.note?`<p class="s">${opt.note}</p>`:''}
-  <div class="bar"><input type="search" class="q" placeholder="Search ${esc(opt.what||'rows')}…" value="${esc(st.q)}">${filt}<button class="sec csv">Export CSV</button><span class="cnt"></span></div><div class="tw"></div>`;
+function listView(key,rows,cfg){
+ const st=state[key]||(state[key]={q:'',f:{},sort:cfg.sort||null,dir:cfg.dir||1,n:100,more:false});
+ const wrap=document.createElement('section');wrap.className='tv';const fv=(r,c)=>c.v?c.v(r):r[c.k];
+ const sel=c=>{const vals=[...new Set(rows.map(r=>String(fv(r,c)??'')).filter(v=>!blank(v)))].sort(Combo.numCmp);
+  return `<label class="fl"><span>${esc(c.label||c.k)}</span><select data-f="${esc(c.label||c.k)}"><option value="">All</option>${vals.map(v=>`<option ${st.f[c.label||c.k]===v?'selected':''}>${esc(v)}</option>`).join('')}</select></label>`};
+ const F=[...(cfg.filters||[]),...(cfg.more||[])];
+ wrap.innerHTML=`${cfg.title?`<h2>${esc(cfg.title)}</h2>`:''}<div class="bar"><input type="search" class="q" placeholder="Search ${esc(cfg.what||'')}…" value="${esc(st.q)}">${(cfg.filters||[]).map(sel).join('')}
+  ${cfg.more&&cfg.more.length?`<button class="sec sm mf">${st.more?'Fewer filters':'More filters'}</button>`:''}<span class="cnt"></span></div>
+  ${cfg.more&&cfg.more.length?`<div class="bar moref" ${st.more?'':'hidden'}>${cfg.more.map(sel).join('')}<button class="sec sm csv">Export CSV</button></div>`:''}<div class="tw"></div>`;
  const tw=wrap.querySelector('.tw'),cnt=wrap.querySelector('.cnt');
  function cur(){const terms=st.q.toLowerCase().split(/\s+/).filter(Boolean);
-  let r=rows.filter(x=>Object.entries(st.f).every(([k,v])=>!v||String(colVal(x,cols.find(c=>c.k===k)||{k}))===v));
-  if(terms.length)r=r.filter(x=>{const t=cols.map(c=>colText(x,c)).join(' ').toLowerCase()+' '+JSON.stringify(x).toLowerCase();return terms.every(w=>t.includes(w))});
-  if(st.sort){const c=cols.find(c=>c.k===st.sort);if(c)r=[...r].sort((a,b)=>{const A=colVal(a,c),B=colVal(b,c);if(A===B)return 0;if(A==null||A==='')return 1;if(B==null||B==='')return -1;
-   return (typeof A==='number'&&typeof B==='number'?A-B:Combo.numCmp(A,B))*st.dir})}
-  return r}
- function draw(){const r=cur();cnt.textContent=`${r.length} of ${rows.length}`;
-  tw.innerHTML=`<table><thead><tr>${cols.map(c=>`<th data-k="${esc(c.k)}" class="${st.sort===c.k?(st.dir>0?'asc':'desc'):''}">${esc(c.label||c.k)}</th>`).join('')}</tr></thead>
-  <tbody>${r.map(x=>`<tr class="${opt.rowClass?opt.rowClass(x):''}">${cols.map(c=>`<td data-l="${esc(c.label||c.k)}">${c.html?c.html(x):esc(colVal(x,c))}</td>`).join('')}</tr>`).join('')||`<tr><td colspan="${cols.length}" class="s">No matches</td></tr>`}</tbody></table>`;
-  tw.querySelectorAll('th').forEach(th=>th.onclick=()=>{const k=th.dataset.k;if(st.sort===k)st.dir*=-1;else{st.sort=k;st.dir=1}draw()})}
- wrap.querySelector('.q').oninput=e=>{st.q=e.target.value;draw()};
- wrap.querySelectorAll('select[data-f]').forEach(s=>s.onchange=()=>{st.f[s.dataset.f]=s.value;draw()});
- wrap.querySelector('.csv').onclick=()=>csv(key,cur(),cols);
+  let r=rows.filter(x=>F.every(c=>{const v=st.f[c.label||c.k];return !v||String(fv(x,c)??'')===v}));
+  if(terms.length)r=r.filter(x=>{const t=(cfg.cols.map(c=>fv(x,c)).join(' ')+' '+JSON.stringify(x)).toLowerCase();return terms.every(w=>t.includes(w))});
+  if(st.sort){const c=cfg.cols.find(c=>(c.label||c.k)===st.sort)||{k:st.sort};const sv=c.s||c.v||(x=>x[c.k]);r=[...r].sort((a,b)=>{const A=sv(a),B=sv(b);if(A===B)return 0;if(blank(A))return 1;if(blank(B))return -1;
+   return (typeof A==='number'&&typeof B==='number'?A-B:Combo.numCmp(String(A),String(B)))*st.dir})}
+  if(cfg.pre)r=cfg.pre(r);return r}
+ const cell=(x,c)=>{const v=c.html?c.html(x):esc(fD(fv(x,c))??'');return blank(v)?'':v};
+ function draw(){const r=cur(),show=r.slice(0,st.n);cnt.textContent=`${r.length} of ${rows.length}`;
+  if(narrow())tw.innerHTML=`<div class="cards">${show.map((x,i)=>{const [a,...rest]=cfg.cols;const meta=rest.map(c=>{const v=cell(x,c);return v?`<span><em>${esc(c.label||c.k)}</em> ${v}</span>`:''}).join('');
+   return `<div class="crd ${cfg.rowClass?cfg.rowClass(x):''}" data-i="${i}" tabindex="0"><div class="ct">${cell(x,a)}</div><div class="cm">${meta}</div></div>`}).join('')||'<p class="s">No matches</p>'}</div>`;
+  else tw.innerHTML=`<table><thead><tr>${cfg.cols.map(c=>`<th data-k="${esc(c.label||c.k)}" class="${st.sort===(c.label||c.k)?(st.dir>0?'asc':'desc'):''}">${esc(c.label||c.k)}</th>`).join('')}</tr></thead>
+   <tbody>${show.map((x,i)=>`<tr data-i="${i}" class="${cfg.rowClass?cfg.rowClass(x):''}" tabindex="0">${cfg.cols.map(c=>`<td>${cell(x,c)}</td>`).join('')}</tr>`).join('')||`<tr><td colspan="${cfg.cols.length}" class="s">No matches</td></tr>`}</tbody></table>`;
+  if(r.length>st.n)tw.insertAdjacentHTML('beforeend',`<div class="more"><button class="sec sm" data-more>Show more (${r.length-st.n} left)</button></div>`);
+  tw.querySelectorAll('th').forEach(th=>th.onclick=()=>{const k=th.dataset.k;if(st.sort===k)st.dir*=-1;else{st.sort=k;st.dir=1}draw()});
+  tw.querySelectorAll('[data-i]').forEach(el=>{const open=e=>{if(e.target.closest('a.ord'))return;cfg.open&&cfg.open(show[+el.dataset.i])};el.onclick=open;el.onkeydown=e=>{if(e.key==='Enter')open(e)}});
+  const m=tw.querySelector('[data-more]');if(m)m.onclick=()=>{st.n+=200;draw()}}
+ wrap.querySelector('.q').oninput=e=>{st.q=e.target.value;st.n=100;draw()};
+ wrap.querySelectorAll('select[data-f]').forEach(s=>s.onchange=()=>{st.f[s.dataset.f]=s.value;st.n=100;draw()});
+ const mf=wrap.querySelector('.mf');if(mf)mf.onclick=()=>{st.more=!st.more;wrap.querySelector('.moref').hidden=!st.more;mf.textContent=st.more?'Fewer filters':'More filters';Combo.scan()};
+ const cv=wrap.querySelector('.csv');if(cv)cv.onclick=()=>csv(key,cur(),cfg.cols);
  draw();return wrap}
-const colVal=(x,c)=>c.v?c.v(x):x[c.k];
-const colText=(x,c)=>{const v=colVal(x,c);return v==null?'':String(v)};
 function csv(name,rows,cols){const q=v=>{v=v==null?'':Array.isArray(v)?v.join(' | '):String(v);return /[",\n]/.test(v)?'"'+v.replace(/"/g,'""')+'"':v};
- const t=[cols.map(c=>q(c.label||c.k)).join(','),...rows.map(r=>cols.map(c=>q(colVal(r,c))).join(','))].join('\n');
+ const t=[cols.map(c=>q(c.label||c.k)).join(','),...rows.map(r=>cols.map(c=>q(c.v?c.v(r):r[c.k])).join(','))].join('\n');
  const a=document.createElement('a');a.href=URL.createObjectURL(new Blob([t],{type:'text/csv'}));a.download=`powerwave_${name}_${new Date().toISOString().slice(0,10)}.csv`;a.click()}
-const autoCols=rows=>{const ks=[];rows.forEach(r=>Object.keys(r).forEach(k=>{if(!ks.includes(k))ks.push(k)}));return ks.map(k=>({k}))};
+const fold=(title,el,open)=>{const d=document.createElement('details');d.className='fold';d.open=!!open;d.innerHTML=`<summary>${esc(title)}</summary>`;d.append(el);return d};
+
+/* ---------- detail panel (full-screen sheet on phones, side panel on desktop) ---------- */
+const HIDE=/^(_|Sources?$|Source$|Email source|ConversationID|Conversation ID|PDF$|PDF files|Date basis|Tracker check|Price basis|Spend kind|Sources)/i;
+function kv(obj,skip=[]){return `<dl class="kv">${Object.entries(obj).filter(([k,v])=>!HIDE.test(k)&&!skip.includes(k)&&!blank(v)).map(([k,v])=>{
+ const val=Array.isArray(v)?v.map(x=>esc(x)).join('<br>'):typeof v==='number'&&/rate|daily|monthly|invoic|total|price|spent/i.test(k)?usd2(v):linkOrders(fD(v));
+ return `<dt>${esc(k)}</dt><dd>${val}</dd>`}).join('')}</dl>`}
+let lastHash='';
+function openPanel(title,html,hash){const p=document.getElementById('panel');p.innerHTML=`<div class="pbg"></div><aside class="pbox" role="dialog" aria-modal="true" aria-label="${esc(title)}">
+ <div class="ph"><h2>${esc(title)}</h2><button class="sec sm px" aria-label="Close">✕</button></div><div class="pb">${html}</div></aside>`;p.hidden=false;document.body.classList.add('noscroll');
+ p.querySelector('.px').onclick=closePanel;p.querySelector('.pbg').onclick=closePanel;p.querySelector('.px').focus();
+ if(hash&&location.hash!=='#'+hash){lastHash=location.hash||'#'+tab;history.pushState(null,'','#'+hash)}return p}
+function closePanel(){const p=document.getElementById('panel');if(p.hidden)return;p.hidden=true;p.innerHTML='';document.body.classList.remove('noscroll');
+ if(/^#(order|unit|rental)=/.test(location.hash))history.pushState(null,'',lastHash&&!/=/.test(lastHash)?lastHash:'#'+tab)}
+document.addEventListener('keydown',e=>{if(e.key==='Escape')closePanel()});
+document.addEventListener('click',e=>{const a=e.target.closest('a.ord');if(a){e.preventDefault();e.stopPropagation();openOrder(a.dataset.o)}});
+
+function openOrder(no){no=String(no||'').toUpperCase();const x=OI[no];if(!x){toast('No data for '+no);return}
+ const o=x.o||{},L=x.lines;
+ const hdr={'Order':no,'Type':x.type,'Status':x.status,'Order date':o['Order date']||x.date,'Ship date':o['Ship date']||L.map(r=>r['Out date']).filter(Boolean).sort()[0],
+  'Returned':L.some(isOn)?(L.some(r=>!isOn(r)&&r['Return/close date'])?'partly - '+L.filter(isOn).length+' item(s) still on rent':''):L.map(r=>r['Return/close date']).filter(Boolean).sort().slice(-1)[0],'Billed through':L.map(r=>r['Billed through']).filter(Boolean).sort().slice(-1)[0],
+  'Placed by':x.who,'PO':L.map(r=>r.PO).find(v=>!blank(v)),'Job':L.map(r=>r.Job).find(v=>!blank(v)),'Ship to':L.map(r=>r['Ship to']).find(v=>!blank(v))||o['Ship to']||L.map(r=>r['Where (ship to / job)']).find(v=>!blank(v)),
+  'Intellirent facility':o['Intellirent facility']||L.map(r=>r['Intellirent facility']).find(v=>!blank(v)),'Board':o.Board,'Assets':o.Assets,'Note':o.Note};
+ const lines=L.map(r=>{const c=r._c;const certs=(D.equipment||[]).filter(e=>e.Serial&&(e.Serial===r.Serial)).flatMap(e=>e.Certs||[]);
+  return `<div class="line ${isOn(r)?'r-on':''}"><div class="lt"><b>${esc(r.Item)}</b> ${stPill(r)}</div>
+  <div class="lm">${[r.Barcode&&'Barcode '+esc(r.Barcode),r.Serial&&'S/N '+esc(r.Serial),c.days!=null&&c.days+' days',r['Out date']&&'out '+fD(r['Out date']),r['Return/close date']&&'back '+fD(r['Return/close date']),r['Billed through']&&'billed thru '+fD(r['Billed through'])].filter(Boolean).join(' · ')}</div>
+  <div class="lm">${[r['Net daily']!=null&&usd2(r['Net daily'])+'/day',r['Net monthly']!=null&&usd2(r['Net monthly'])+'/mo',r['List daily']&&r['Net daily']==null&&'list '+usd2(r['List daily'])+'/day'].filter(Boolean).join(' · ')}</div>
+  <div class="lm">${c.spent!=null?`<b>${usd2(c.spent)}</b> ${c.est?pill('estimate','amber'):pill('actual invoiced','green')}`:'<span class="unk">price unknown</span>'}${r['History scope']==='Carried over'?' <span class="s">carried over, may be partial</span>':''}</div>
+  ${r['Cal exp']||certs.length?`<div class="lm">Cal cert: ${r['Cal exp']?'expires '+fD(r['Cal exp']):''} ${certs.map(p=>`<span class="path">${esc(p)}</span>`).join('')}</div>`:''}</div>`}).join('');
+ const quotes=(D.quotes||[]).filter(q=>(q.Source||'').includes(no)||q.Quote===no);
+ const pdfs=o['PDF files']||[];
+ const html=`${kv(hdr)}
+  <div class="tots"><div><b>${usd2(x.actual)}</b><span>actual invoiced</span></div><div><b>${usd2(x.estimate)}</b><span>estimated</span></div><div><b>${L.length}</b><span>line(s)</span></div></div>
+  <h3>Line items</h3>${lines||(o.Items?`<p>${esc(o.Items)}</p>`:'<p class="s">No line items on file.</p>')}
+  ${o['Email lines']?`<h3>Order email lines</h3><p class="s">${esc(o['Email lines'])}</p>`:''}
+  ${quotes.length?`<h3>Quote lines</h3>${quotes.map(q=>`<div class="line"><b>${esc(q.Item)}</b> ${esc(q.Description||'')}<div class="lm">${esc(q.Quote)} · qty ${esc(q.Qty)} · ${esc(q['Line total']||q['Unit price'])}</div></div>`).join('')}`:''}
+  <h3>Original order PDF</h3><div class="pdfs">${pdfs.length?(Auth.live&&Auth.pdfUrl?pdfs.map(n=>`<div class="pdf" data-n="${esc(n)}"><p class="s">Loading ${esc(n)}…</p></div>`).join(''):'<p class="s">PDF not available offline - open the live site.</p>'):'<p class="s">No PDF on file for this order.</p>'}</div>`;
+ const p=openPanel('Order '+no,html,'order='+no);
+ p.querySelectorAll('.pdf').forEach(async el=>{try{const u=await Auth.pdfUrl(el.dataset.n);
+  el.innerHTML=`<div class="row"><a class="btn" href="${esc(u)}" target="_blank" rel="noopener">Open PDF</a><span class="s">${esc(el.dataset.n)} · link expires in 10 min</span></div><iframe src="${esc(u)}" title="${esc(el.dataset.n)}" loading="lazy"></iframe>`}
+  catch(e){el.innerHTML=`<p class="s">Could not load PDF: ${esc(e.message)}</p>`}})}
+function openRental(r){const c=r._c;openPanel(r.Item,`<p>${stPill(r)} ${oLink(r.Order)}</p>
+ <div class="tots"><div><b>${c.spent!=null?usd2(c.spent):'?'}</b><span>${c.spent==null?'price unknown':c.est?'estimate':'actual invoiced'}</span></div><div><b>${c.days??''}</b><span>days</span></div></div>
+ ${kv({...r,'Days out':c.days},['Item','Status','Order','Who (ordered by)','Where (ship to / job)'])}<p class="s">${esc(c.basis||'')}</p>`,'rental='+r._i)}
+function openUnit(e){const d=dueInfo(e);openPanel(e.Unit+' · '+e.Model,`<p>${pill(e.Status,e.Status==='MISSING'?'red':'green')} <span class="due ${d.k}">${esc(d.t)}</span> ${tagHTML(e['Cal tag'])}</p>
+ ${kv(e,['Certs','Notes'])}${e.Notes?`<h3>Notes</h3><p class="note">${linkOrders(e.Notes)}</p>`:''}${(e.Certs||[]).length?`<h3>Cert file(s)</h3>${e.Certs.map(p=>`<span class="path">${esc(p)}</span>`).join('')}`:'<p class="s">No cert file found.</p>'}`,'unit='+encodeURIComponent(e.Unit+'|'+e.Serial))}
+const openRow=(title,r)=>openPanel(title,kv(r));
+function fromHash(){const h=decodeURIComponent(location.hash.slice(1));let m;
+ if((m=/^order=(.+)$/.exec(h)))return openOrder(m[1]),true;
+ if((m=/^rental=(\d+)$/.exec(h))&&R[+m[1]])return openRental(R[+m[1]]),true;
+ if((m=/^unit=(.*)\|(.*)$/.exec(h))){const e=D.equipment.find(e=>e.Unit===m[1]&&e.Serial===m[2]);if(e)return openUnit(e),true}
+ return false}
 
 /* ---------- tabs ---------- */
 const TABS=[['rentals','Live Rentals'],['equipment','Equipment'],['tech','Tech Assignments'],['certsneeded','Certs Needed'],
- ['orders','Intellirent Orders'],['orderlist','Order List'],['search','Global Search'],['sources','Sources & Gaps'],['users','Users'],['account','Account']];
-let tab=(location.hash||'#rentals').slice(1);
+ ['orders','Intellirent Orders'],['orderlist','Order List'],['search','Global Search'],['users','Users'],['account','Account']];
+let tab=(location.hash||'#rentals').slice(1);if(/=/.test(tab))tab='rentals';
 function nav(){document.getElementById('tabs').innerHTML=TABS.filter(([k])=>k!=='users'||Auth.isAdmin).filter(([k])=>k!=='account'||Auth.live)
  .map(([k,l])=>`<button role="tab" class="${k===tab?'on':''}" data-t="${k}">${l}</button>`).join('');
  document.querySelectorAll('#tabs button').forEach(b=>b.onclick=()=>{tab=b.dataset.t;location.hash=tab;render()})}
 function render(){nav();app.innerHTML='';(V[tab]||V.rentals)();Combo.scan();window.scrollTo(0,0)}
-const fmtT=t=>t?new Date(t).toLocaleString('en-US',{timeZone:'America/Chicago',dateStyle:'short',timeStyle:'short'})+' CT':'n/a';
-const stamp=src=>{const s=(D.sources||[]).find(x=>x.Source.startsWith(src));if(!s)return '';const t=s.dropbox_modified||s.file_modified||s.fetched||'';
- return `<span class="stamp"><b>${esc(s.Source)}</b>: ${s.present===false?'not present yet':'updated '+fmtT(t)}</span>`};
-const head=(h,src)=>{const d=document.createElement('div');d.innerHTML=`<h1>${h}</h1>${src.map(stamp).join('')}<span class="stamp">Site data built ${fmtT(D.built)}</span>`;app.append(d)};
-
+const fmtT=t=>t?new Date(t).toLocaleString('en-US',{timeZone:'America/Chicago',month:'short',day:'numeric',year:'numeric',hour:'numeric',minute:'2-digit'})+' CT':'';
+const head=h=>{const d=document.createElement('div');d.className='hd';d.innerHTML=`<h1>${h}</h1><span class="s">Data as of ${fmtT(D.built)}</span>`;app.append(d)};
 const dueInfo=e=>{const d=pd(e['Due date']);if(!d)return {k:'nodate',t:'no due date',n:null};const n=days(TODAY(),d);
- return n<0?{k:'over',t:`OVERDUE ${-n}d`,n}:n<=30?{k:'soon',t:`due in ${n}d`,n}:{k:'ok',t:`${n}d left`,n}};
+ return n<0?{k:'over',t:`overdue ${-n}d`,n}:n<=30?{k:'soon',t:`due in ${n}d`,n}:{k:'ok',t:`${n}d left`,n}};
+const kpis=items=>{const k=document.createElement('div');k.className='kpis';k.innerHTML=items.map(([v,l,w])=>`<div class="kpi ${w?'warnk':''}"><b>${v}</b><span>${l}</span></div>`).join('');app.append(k)};
+const groupOrders=(title,L)=>{const nos=[...new Set(L.map(r=>r.Order))].map(n=>OI[n]).sort((a,b)=>String(b.date).localeCompare(String(a.date)));
+ openPanel(title,`<p class="s">${nos.length} orders · tap one for detail</p>${nos.map(x=>`<div class="line"><div class="lt">${oLink(x.no)} <span class="s">${fD(x.date)}</span> <b style="float:right">${usd(x.total)}</b></div><div class="lm">${esc(x.who)} · ${esc(x.where)}</div></div>`).join('')}`)};
 
 const V={
- rentals(){head('Live Rental Tracker',['Intellirent rental history','Intellirent Asset list','Cal tracker','Order PDFs','Outlook pricing']);
-  const R=D.rentals.map(r=>({...r,_c:rentalCalc(r)}));const on=R.filter(r=>String(r.Status).startsWith('ON RENT'));
-  const spentOn=on.reduce((a,r)=>a+(r._c.spent||0),0),unk=on.filter(r=>r._c.spent==null);
-  const longest=on.filter(r=>r._c.days!=null).sort((a,b)=>b._c.days-a._c.days)[0];
-  const unpricedOrders=[...new Set(unk.map(r=>r.Order))];
-  const now=TODAY(),yr=String(now.getFullYear()),ym=yr+'-'+String(now.getMonth()+1).padStart(2,'0');
-  const tot=f=>{let a=0,e=0;R.forEach(r=>{if(!f(r)||r._c.spent==null)return;a+=r._c.spent;if(r['Spend kind']!=='actual')e+=r._c.spent});return {a,e}};
-  const kp=(t,lbl)=>`<div class="kpi"><b>${usd(t.a)}</b><span>${lbl}${t.e?` (incl. ${usd(t.e)} estimated)`:' (actual invoiced)'}</span></div>`;
-  const mo=r=>String(r['Out date']||'');
-  const k=document.createElement('div');k.className='kpis';k.innerHTML=`
-   ${kp(tot(()=>true),'spent all-time')}
-   ${kp(tot(r=>mo(r).startsWith(yr)),'spent in '+yr)}
-   ${kp(tot(r=>mo(r).startsWith(ym)),'spent this month (went out '+ym+')')}
-   <div class="kpi"><b>${on.length}</b><span>items on rent now · ${usd(spentOn)} accrued so far (estimate, pre-tax; ${unk.length} price unknown)</span></div>
-   <div class="kpi"><b>${longest?longest._c.days+' days':'-'}</b><span>longest out${longest?': '+esc(longest.Item)+' ('+esc(longest.Order)+')':''}</span></div>
-   <div class="kpi warnk"><b>${unpricedOrders.length}</b><span>on-rent orders with price unknown: ${esc(unpricedOrders.join(', '))}</span></div>`;app.append(k);
-  const st=state.rentals||(state.rentals={q:'',f:{Status:''},sort:'days',dir:-1});
-  app.append(tableView('rentals',R,[
-   {k:'Status',html:r=>`<span class="pill ${String(r.Status).startsWith('ON RENT')?'red':r.Status==='RETURNED'?'green':'amber'}">${esc(r.Status)}</span>`},
-   {k:'Item',html:r=>`<b>${esc(r.Item)}</b>${r.Barcode?`<div class="s">${esc(r.Barcode)}${r.Serial?' · S/N '+esc(r.Serial):''}</div>`:''}`},
-   {k:'Who (ordered by)',label:'Who'},{k:'Where (ship to / job)',label:'Where',v:r=>r['Where (ship to / job)']||(r['Intellirent facility']?'Intellirent '+r['Intellirent facility']:'')},
-   {k:'Out date',label:'Went out',html:r=>`${fmtD(r['Out date'])}${r['Date basis']==='order'?' <span class="s">(order date)</span>':''}`},
-   {k:'days',label:'Days out',v:r=>r._c.days},
-   {k:'Return/close date',label:'Returned',html:r=>fmtD(r['Return/close date'])},
-   {k:'Billed through',label:'Billed thru',html:r=>fmtD(r['Billed through'])},{k:'Job'},{k:'PO'},{k:'Type'},
-   {k:'rate',label:'Rate (net)',v:r=>r['Net daily']!=null?`${usd(r['Net daily'])}/day · ${usd(r['Net monthly'])}/mo`:''},
-   {k:'spent',label:'Spent so far',v:r=>r._c.spent,html:r=>r._c.spent!=null?`<b>${usd(r._c.spent)}</b><div class="s">${esc(r._c.basis)}</div>`:`<span class="unk">price unknown</span><div class="s">${esc(r._c.basis)}</div>`},
-   {k:'Order',html:r=>`<b>${esc(r.Order)}</b>${r.PDF?pathHTML(r.PDF):'<div class="s">no PDF on file</div>'}`},
-   {k:'Intellirent facility',label:'IR facility'}],
-   {what:'rentals (item, tech, order, serial…)',filters:[{k:'Status'},{k:'Who (ordered by)',label:'Who'},{k:'Job'},{k:'Spend kind',label:'Actual/estimate'},{k:'Type'},{k:'Order'}],
-    sort:'days',dir:-1,rowClass:r=>String(r.Status).startsWith('ON RENT')?'r-on':'',
-    note:'<b>Primary source: Intellirent rental history</b> (actual invoiced $, return dates, placed by, ship to, job, PO, billed through). Lines from that report are <b>actual</b>; carried-over-only lines may be partial. ON RENT = in Intellirent\'s 11/4 asset list (or an unidentified item on an open board order); those, and any line without an invoiced amount, are <b>ESTIMATES</b>: net rate from the latest order email (else order PDF), cheaper of net daily × days or 28-day months × net monthly + leftover days, pre-tax, live to today. No rate on file = "price unknown" (never guessed). Monthly/yearly totals are by the date the item went out.'}));
-  const SS=D.spend_summary||{};const sc=[{k:'Key',label:'Group'},{k:'Invoiced',v:r=>r.Invoiced,html:r=>`<b>${usd(r.Invoiced)}</b>`},{k:'Orders'},{k:'Lines'}];
-  [['by_job','Spend by job / facility (actual invoiced)'],['by_person','Spend by person who placed the order (actual invoiced)'],['by_month','Spend by month the item went out (actual invoiced)']].forEach(([key,t])=>{
-   if(SS[key]&&SS[key].length)app.append(tableView('ss_'+key,SS[key],sc,{title:t,what:'groups',sort:key==='by_month'?'Key':'Invoiced',dir:-1}))});
-  if(D.quotes&&D.quotes.length)app.append(tableView('quotes',D.quotes,autoCols(D.quotes),{title:'Quotes (not spend)',what:'quotes'}));
+ rentals(){head('Live Rentals');
+  const on=R.filter(isOn),now=TODAY(),yr=String(now.getFullYear()),ym=yr+'-'+String(now.getMonth()+1).padStart(2,'0');
+  const tot=f=>{let a=0,e=0;R.forEach(r=>{if(!f(r)||r._c.spent==null)return;a+=r._c.spent;if(r._c.est)e+=r._c.spent});return [usd(a),e?`incl. ${usd(e)} est.`:'actual']};
+  const all=tot(()=>true),y=tot(r=>String(r['Out date']).startsWith(yr)),m=tot(r=>String(r['Out date']).startsWith(ym));
+  const accr=on.reduce((a,r)=>a+(r._c.spent||0),0),unk=on.filter(r=>r._c.spent==null).length;
+  kpis([[all[0],'spent all-time · '+all[1]],[y[0],'spent in '+yr+' · '+y[1]],[m[0],'this month · '+m[1]],[on.length,`on rent now · ${usd(accr)} accrued (est.)${unk?` · ${unk} price unknown`:''}`,unk]]);
+  const st=state.rentals||(state.rentals={q:'',f:{},sort:null,dir:-1,n:100,more:false});
+  app.append(listView('rentals',R,{what:'item, order, person, serial',open:openRental,rowClass:r=>isOn(r)?'r-on':'',
+   pre:r=>state.rentals.sort?r:[...r].sort((a,b)=>(isOn(b)-isOn(a))||String(b['Out date']).localeCompare(String(a['Out date']))),
+   cols:[{k:'Item',html:r=>`<b>${esc(r.Item)}</b>`},{k:'Order',html:r=>oLink(r.Order)},{k:'Who',v:r=>r['Placed by']&&r['Placed by']!=='(unknown)'?r['Placed by']:(r['Who (ordered by)']!=='(unknown)'?r['Who (ordered by)']:'')},
+    {k:'Where',v:r=>r.Job||r['Ship to']||r['Where (ship to / job)']||''},{k:'Days out',v:r=>r._c.days},
+    {k:'$ spent',v:r=>r._c.spent,html:r=>r._c.spent!=null?`${usd(r._c.spent)}${r._c.est?' <small class="est">est.</small>':''}`:'<span class="unk">?</span>'},
+    {k:'Status',v:r=>isOn(r)?'On rent':r.Status==='RETURNED'?'Returned':'Likely returned',html:stPill}],
+   filters:[{k:'Status',v:r=>isOn(r)?'On rent':r.Status==='RETURNED'?'Returned':'Likely returned'},{k:'Who',v:r=>r['Placed by']||r['Who (ordered by)']},{k:'Year',v:r=>String(r['Out date']||'').slice(0,4)}],
+   more:[{k:'Job'},{k:'Type'},{k:'Spend',v:r=>r._c.spent==null?'Price unknown':r._c.est?'Estimate':'Actual'},{k:'Intellirent facility',label:'IR facility'}]}));
+  const SS=D.spend_summary||{};
+  [['by_job','Spend by job / facility',r=>r.Job?'Job: '+r.Job:r['Ship to']?'Ship to: '+r['Ship to']:''],['by_person','Spend by person',r=>r['Placed by']],['by_month','Spend by month',r=>String(r['Out date']||'').slice(0,7)]].forEach(([k,t,kf])=>{
+   if(!SS[k]||!SS[k].length)return;const norm=s=>String(s||'').toLowerCase().replace(/^(job|ship to): /,'');
+   const el=listView('ss_'+k,SS[k],{what:'groups',sort:k==='by_month'?'Group':'Invoiced',dir:-1,
+    open:g=>groupOrders(t+': '+g.Key,R.filter(r=>!r._c.est&&norm(kf(r))===norm(g.Key))),
+    cols:[{k:'Key',label:'Group'},{k:'Invoiced',v:r=>r.Invoiced,html:r=>`<b>${usd(r.Invoiced)}</b>`},{k:'Orders'}]});
+   app.append(fold(t+' (actual invoiced)',el))});
+  if(D.quotes&&D.quotes.length)app.append(fold('Quotes (not spend)',listView('quotes',D.quotes,{what:'quotes',open:q=>openRow('Quote '+q.Quote,q),cols:[{k:'Quote'},{k:'Item'},{k:'Line total'},{k:'Received',v:q=>fD(String(q.Received).slice(0,10))}]})));
+  app.append(fold('How spend is calculated',Object.assign(document.createElement('p'),{className:'s',innerHTML:'Actual = invoiced amount from Intellirent\'s rental history (carried-over-only lines may be partial). Items still on rent, and lines with no invoiced amount, are <b>estimates</b>: net rate from the latest order email (else the order PDF), cheaper of daily × days or 28-day months × monthly + leftover days, pre-tax, live to today. No rate on file = price unknown (never guessed). Month/year totals use the date the item went out.'})));
  },
- equipment(){head('Owned Equipment',['Cal tracker']);
-  const E=D.equipment.map(e=>({...e,_d:dueInfo(e)}));
-  const k=document.createElement('div');k.className='kpis';const c=f=>E.filter(f).length;
-  k.innerHTML=`<div class="kpi"><b>${E.length}</b><span>units</span></div><div class="kpi warnk"><b>${c(e=>e.Status==='MISSING')}</b><span>MISSING (not confirmed)</span></div>
-   <div class="kpi warnk"><b>${c(e=>e._d.k==='over')}</b><span>overdue</span></div><div class="kpi"><b>${c(e=>e._d.k==='soon')}</b><span>due ≤30 days</span></div>
-   <div class="kpi"><span>Cal tags: ${tagHTML('JAN')} ${tagHTML('MAY')} ${tagHTML('SEP')}</span></div>`;app.append(k);
-  app.append(tableView('equipment',E,[
-   {k:'Status',html:e=>`<span class="pill ${e.Status==='MISSING'?'red':'green'}">${e.Status}</span>`},
-   {k:'Unit',html:e=>`<b>${esc(e.Unit)}</b>`},{k:'Model'},{k:'Serial'},{k:'Holder'},
-   {k:'Cal date',html:e=>fmtD(e['Cal date'])},{k:'Due date',v:e=>e['Due date'],html:e=>`<span class="due ${e._d.k}">${fmtD(e['Due date'])}<br><small>${e._d.t}</small></span>`},
-   {k:'due',label:'Due status',v:e=>({over:'Overdue',soon:'Due soon',ok:'OK',nodate:'No date'})[e._d.k]},
-   {k:'Cal tag',html:e=>tagHTML(e['Cal tag'])},{k:'AirTag'},
-   {k:'Intellirent facility',label:'At Intellirent',v:e=>[e['Intellirent facility'],e['Intellirent last order']].filter(Boolean).join(' · ')},
-   {k:'Certs',label:'Cert file(s)',v:e=>e.Certs.join(' | '),html:e=>e.Certs.length?e.Certs.map(pathHTML).join(''):'<span class="unk">no cert found</span>'},
-   {k:'Notes',html:e=>`<div class="note">${esc(e.Notes)}</div>`}],
-   {what:'equipment (unit, serial, holder, notes…)',filters:[{k:'Status'},{k:'Holder'},{k:'due',label:'Due status',v:e=>({over:'Overdue',soon:'Due soon',ok:'OK',nodate:'No date'})[e._d.k]},{k:'Cal tag'}],
-    rowClass:e=>(e.Status==='MISSING'?'r-miss ':'')+'tag-'+(TAGC[e['Cal tag']]||''),
-    note:'Rule: equipment is <b>MISSING unless confirmed</b> by a named holder in the tracker. Due color: red = overdue, amber = due within 30 days, green = OK.'}));
+ equipment(){head('Equipment');
+  const E=D.equipment.map(e=>({...e,_d:dueInfo(e)}));const c=f=>E.filter(f).length;
+  kpis([[E.length,'units'],[c(e=>e.Status==='MISSING'),'missing (not confirmed)',1],[c(e=>e._d.k==='over'),'cal overdue',1],[c(e=>e._d.k==='soon'),'due within 30 days']]);
+  const dl=e=>({over:'Overdue',soon:'Due soon',ok:'OK',nodate:'No date'})[e._d.k];
+  app.append(listView('equipment',E,{what:'unit, model, serial, holder',open:openUnit,rowClass:e=>(e.Status==='MISSING'?'r-miss ':'')+'tag-'+(TAGC[e['Cal tag']]||''),
+   cols:[{k:'Unit',label:'Asset',html:e=>`<b>${esc(e.Unit)}</b>`},{k:'Model'},{k:'Holder'},{k:'Due date',label:'Cal due',s:e=>e['Due date'],v:e=>e['Due date'],html:e=>e['Due date']?`<span class="due ${e._d.k}">${fD(e['Due date'])}</span>`:''},
+    {k:'Status',html:e=>pill(e.Status==='MISSING'?'Missing':'Confirmed',e.Status==='MISSING'?'red':'green')}],
+   filters:[{k:'Status'},{k:'Holder'},{k:'due',label:'Cal due',v:dl}],more:[{k:'Cal tag'},{k:'Model'}]}));
  },
- tech(){head('Tech Assignments',['Cal tracker']);
-  app.append(tableView('tech',D.tech,[{k:'Technician'},{k:'Category'},{k:'Unit'},{k:'Cal tag',html:r=>tagHTML(r['Cal tag'])},{k:'Item / note',html:r=>`<div class="note">${esc(r['Item / note'])}</div>`}],
-   {title:'Equipment Distribution',what:'assignments',filters:[{k:'Technician'},{k:'Category'},{k:'Cal tag'}],rowClass:r=>'tag-'+(TAGC[r['Cal tag']]||'')}));
-  app.append(tableView('replies',D.tech_replies,autoCols(D.tech_replies).map(c=>({...c,html:r=>`<div class="note">${esc(r[c.k])}</div>`})),{title:'Tech Replies',what:'replies',filters:[{k:'Replied (Y/N)'}]}));
-  if(D.roster.length)app.append(tableView('roster',D.roster,autoCols(D.roster),{title:'Employee roster (Sheet1 side list)',what:'employees'}));
+ tech(){head('Tech Assignments');
+  app.append(listView('tech',D.tech,{what:'tech, unit, item',open:r=>openRow(r.Technician+' · '+(r.Unit||''),r),
+   cols:[{k:'Technician',label:'Tech',html:r=>`<b>${esc(r.Technician)}</b>`},{k:'Item / note',label:'Equipment',v:r=>String(r['Item / note']||'').replace(/\s*\[(JAN|MAY|SEP)\]\s*$/,'')},{k:'Unit',label:'Asset'}],
+   filters:[{k:'Technician',label:'Tech'},{k:'Category'}],more:[{k:'Cal tag'}]}));
+  const cols=rows=>{const ks=[];rows.forEach(r=>Object.keys(r).forEach(k=>{if(!ks.includes(k)&&!HIDE.test(k))ks.push(k)}));return ks};
+  if(D.tech_replies.length){const k=cols(D.tech_replies);app.append(fold('Tech replies ('+D.tech_replies.length+')',listView('replies',D.tech_replies,{what:'replies',open:r=>openRow(r[k[0]],r),cols:k.slice(0,3).map(x=>({k:x}))})))}
+  if(D.roster.length)app.append(fold('Employee roster',listView('roster',D.roster,{what:'employees',cols:[{k:'Employee'}]})));
  },
- certsneeded(){head('Certs Needed',['Cal tracker']);
-  app.append(tableView('cn',D.certs_needed,autoCols(D.certs_needed).map(c=>({...c,html:r=>/date|due|cal/i.test(c.k)?fmtD(r[c.k]):`<div class="note">${esc(r[c.k])}</div>`})),
-   {what:'certs needed',filters:[{k:'Category'},{k:'Who has it'}],rowClass:r=>/EXPIRED/i.test(r.Category)?'r-miss':/DONE/i.test(r.Category)?'r-ok':''}));
+ certsneeded(){head('Certs Needed');
+  app.append(listView('cn',D.certs_needed,{what:'asset, model, serial',open:r=>openRow((r['Unit ID']||'')+' · '+(r['Make / Model']||''),r),
+   rowClass:r=>/EXPIRED/i.test(r.Category)?'r-miss':/DONE/i.test(r.Category)?'r-ok':'',
+   cols:[{k:'Unit ID',label:'Asset',html:r=>`<b>${esc(r['Unit ID'])}</b>`},{k:'Make / Model',label:'Item'},{k:'Category',label:'Status',v:r=>String(r.Category||'').replace(/^\d+\.\s*/,'')}],
+   filters:[{k:'Category',label:'Status',v:r=>String(r.Category||'').replace(/^\d+\.\s*/,'')},{k:'Who has it'}]}));
  },
- orders(){head('Intellirent Orders',['Cal tracker','PowerWave Order List','Order PDFs','Intellirent Order list']);
-  app.append(tableView('orders',D.orders,[{k:'Order',html:o=>`<b>${esc(o.Order)}</b>${o.Board?`<span class="pill amber">${esc(o.Board)}</span>`:''}`},{k:'Type'},{k:'Ordered by'},
-   {k:'Order date',html:o=>fmtD(o['Order date'])},{k:'Ship date',html:o=>fmtD(o['Ship date'])},{k:'Status'},{k:'Status date',html:o=>fmtD(o['Status date'])},
-   {k:'Intellirent facility',label:'IR facility'},{k:'Ship to'},{k:'Assets'},{k:'Items',html:o=>`<div class="note">${esc(o.Items)}</div>`},
-   {k:'Daily total',label:'Net/day',html:o=>usd(o['Daily total'])},{k:'Monthly total',label:'Net/mo',html:o=>usd(o['Monthly total'])},
-   {k:'Email lines',label:'Email order lines (latest)',html:o=>`<div class="note">${esc(o['Email lines']||'')}</div>`},{k:'Invoice total',label:'Invoice',html:o=>usd(o['Invoice total'])||usd(o['Sale/misc total'])},{k:'PDF',html:o=>o.PDF?pathHTML(o.PDF):'<span class="s">none</span>'},{k:'Note'}],
-   {what:'orders',filters:[{k:'Type'},{k:'Status'},{k:'Board'},{k:'Ordered by'}],sort:'Order date',dir:-1,note:'Merged from the cal tracker\'s Intellirent Orders board (11/4), PowerWave Order List.xlsx, the Intellirent Order list CSV and order PDFs.'}));
+ orders(){head('Intellirent Orders');
+  const O=Object.values(OI);
+  app.append(listView('orders',O,{what:'order #, person, place, item',open:x=>openOrder(x.no),sort:'Date',dir:-1,rowClass:x=>x.status==='On rent'?'r-on':'',
+   cols:[{k:'no',label:'Order',html:x=>oLink(x.no)},{k:'date',label:'Date',v:x=>x.date},{k:'who',label:'Who'},{k:'where',label:'Where'},
+    {k:'total',label:'Total',v:x=>x.total,html:x=>x.total!=null?usd(x.total)+(x.estimate?' <small class="est">est.</small>':''):''},{k:'status',label:'Status'}],
+   filters:[{k:'type',label:'Type'},{k:'who',label:'Who'},{k:'status',label:'Status'}],more:[{k:'year',label:'Year',v:x=>String(x.date).slice(0,4)}]}));
  },
- orderlist(){head('Order List & Board (raw)',['PowerWave Order List','Cal tracker']);
-  app.append(tableView('board',D.board,autoCols(D.board),{title:'Intellirent order board (cal tracker tab, as of 11/4)',what:'board',filters:[{k:'Board'},{k:'Type'},{k:'Ordered By'}]}));
-  app.append(tableView('ol',D.order_list,autoCols(D.order_list).map(c=>({...c,html:r=>/Date/.test(c.k)?fmtD(r[c.k]):esc(r[c.k])})),{title:'PowerWave Order List.xlsx',what:'order list',filters:[{k:'Order Status'},{k:'Ordered By'}]}));
+ orderlist(){head('Order List & Board');
+  app.append(listView('board',D.board,{title:'Intellirent order board (cal tracker)',what:'board',open:r=>openOrder(r['Order No']),
+   cols:[{k:'Order No',label:'Order',html:r=>oLink(r['Order No'])},{k:'Order Date',label:'Date'},{k:'Ordered By',label:'Who'},{k:'Board',label:'Status'}],filters:[{k:'Board',label:'Status'},{k:'Ordered By',label:'Who'}]}));
+  app.append(listView('ol',D.order_list,{title:'PowerWave Order List',what:'order list',open:r=>OI[r['Order Number']]?openOrder(r['Order Number']):openRow(r['Order Number'],r),sort:'Date',dir:-1,
+   cols:[{k:'Order Number',label:'Order',html:r=>oLink(r['Order Number'])},{k:'Order Date',label:'Date'},{k:'Ordered By',label:'Who'},{k:'Shipping Address',label:'Where'},{k:'Order Status',label:'Status'}],
+   filters:[{k:'Order Status',label:'Status'},{k:'Ordered By',label:'Who'}]}));
  },
- search(){head('Global Search',[]);const q=document.getElementById('gq').value.trim();
+ search(){head('Global Search');const q=document.getElementById('gq').value.trim();
   const box=document.createElement('div');box.innerHTML=`<div class="bar"><input type="search" id="gs" placeholder="Type anything: unit, serial, tech, order #, model…" value="${esc(q)}"></div><div id="gres"></div>`;app.append(box);
   const inp=box.querySelector('#gs');inp.oninput=()=>{document.getElementById('gq').value=inp.value;gsearch(inp.value)};gsearch(q);inp.focus();
  },
- sources(){head('Sources & Data Gaps',[]);
-  app.append(tableView('src',D.sources.map(s=>({Source:s.Source,Path:s.dropbox_path||s.box_path||'',Updated:s.dropbox_modified||s.file_modified||'',Fetched:s.fetched||'',Info:Object.entries(s).filter(([k])=>!['Source','dropbox_path','box_path','dropbox_modified','file_modified','fetched'].includes(k)).map(([k,v])=>k+': '+v).join(', ')})),
-   [{k:'Source'},{k:'Path',html:r=>pathHTML(r.Path)},{k:'Updated'},{k:'Fetched'},{k:'Info'}],{title:'Sources (read-only)',what:'sources'}));
-  app.append(tableView('gaps',D.gaps.map(g=>({Gap:g})),[{k:'Gap'}],{title:'Data gaps & conflicts found by build_data.py',what:'gaps'}));
- },
- async users(){head('Users',[]);if(!Auth.isAdmin){app.insertAdjacentHTML('beforeend','<p>Admins only.</p>');return}
+ async users(){head('Users');if(!Auth.isAdmin){app.insertAdjacentHTML('beforeend','<p>Admins only.</p>');return}
   if(!Auth.live){app.insertAdjacentHTML('beforeend','<p class="s">User management needs the Supabase backend (config.js + admin-users Edge Function). In LOCAL DEV mode there are no accounts.</p>')}
   const box=document.createElement('div');app.append(box);
   box.innerHTML=`<h2>Create user</h2><div class="bar"><input id="nu_e" type="email" placeholder="Email" autocomplete="off"><input id="nu_n" placeholder="Name (optional)">
@@ -177,8 +234,9 @@ const V={
     const d=c.querySelector('.u_dis');if(d)d.onclick=()=>act(d.textContent==='Disable'?'disable':'enable',{user_id:id},'Done');
     const r=c.querySelector('.u_del');if(r)r.onclick=()=>{if(confirm('Remove this user permanently?'))act('delete',{user_id:id},'User removed')}})}
   catch(e){box.querySelector('#ul').textContent='Failed: '+e.message}
+  app.append(fold('Sources & data gaps (admin)',sourcesEl()));
  },
- account(){head('Account',[]);app.insertAdjacentHTML('beforeend',`<p>Signed in as <b>${esc(Auth.email)}</b> · role <b>${esc(Auth.role)}</b></p><div class="row">${pwField('mypw','New password (10+)')}<button class="sec" id="cpw">Change my password</button><button class="sec" id="sout">Sign out</button></div>`);
+ account(){head('Account');app.insertAdjacentHTML('beforeend',`<p>Signed in as <b>${esc(Auth.email)}</b> · role <b>${esc(Auth.role)}</b></p><div class="row">${pwField('mypw','New password (10+)')}<button class="sec" id="cpw">Change my password</button><button class="sec" id="sout">Sign out</button></div>`);
   bindPw(app);document.getElementById('sout').onclick=Auth.signOut;document.getElementById('cpw').onclick=async()=>{try{await Auth.changePw(document.getElementById('mypw').value);toast('Password changed')}catch(e){toast(e.message)}}}
 };
 const pwField=(id,ph)=>`<span class="pwf"><input id="${id}" type="password" placeholder="${ph}" minlength="10" autocomplete="new-password"><button type="button" class="sec sm pwt" data-for="${id}" aria-label="Show password">Show</button></span>`;
@@ -186,21 +244,25 @@ function bindPw(root){root.querySelectorAll('.pwt').forEach(b=>b.onclick=()=>{co
 async function act(action,body,ok){if(body.password!==undefined&&body.password.length<10)return toast('Password must be 10+ characters');
  if(!Auth.live)return toast('No backend configured (LOCAL DEV)');try{await Auth.admin(action,body);toast(ok);V.users()}catch(e){toast('Failed: '+e.message)}}
 function toast(t){const d=document.createElement('div');d.className='toast';d.textContent=t;document.body.append(d);setTimeout(()=>d.remove(),2500)}
+function sourcesEl(){const d=document.createElement('div');
+ d.innerHTML=`<h3>Sources</h3>${(D.sources||[]).map(s=>`<div class="line"><b>${esc(s.Source)}</b><div class="lm">${esc(fmtT(s.dropbox_modified||s.file_modified||s.fetched||''))}${s.present===false?' · not present':''}</div></div>`).join('')}
+  <h3>Data gaps (${D.gaps.length})</h3>${D.gaps.map(g=>`<p class="s">${linkOrders(g)}</p>`).join('')}`;return d}
 
-/* ---------- global search across every dataset ---------- */
-function gsets(){const S=[['Live Rentals','rentals',D.rentals,r=>`${r.Item} · ${r.Order} · ${r.Status}`],['Equipment','equipment',D.equipment,r=>`${r.Unit} · ${r.Model} · S/N ${r.Serial} · ${r.Holder} · ${r.Status}`],
-  ['Tech Assignments','tech',D.tech,r=>`${r.Technician} · ${r.Category} · ${r['Item / note']}`],['Tech Replies','tech',D.tech_replies,r=>Object.values(r)[0]+' · '+(Object.values(r)[3]||'')],
-  ['Certs Needed','certsneeded',D.certs_needed,r=>Object.values(r).slice(0,5).join(' · ')],
-  ['Intellirent Orders','orders',D.orders,r=>`${r.Order} · ${r.Type} · ${r['Ordered by']} · ${r.Status||r.Board} · ${r.Items||''}`]];return S}
-function gsearch(q){const el=document.getElementById('gres');if(!el)return;const terms=q.toLowerCase().split(/\s+/).filter(Boolean);if(!terms.length){el.innerHTML='<p class="s">Searches rentals, equipment, techs, replies, certs needed, orders and every other tracker tab.</p>';return}
- let html='',total=0;for(const [name,t,rows,lab] of gsets()){const hits=rows.filter(r=>{const s=JSON.stringify(r).toLowerCase();return terms.every(w=>s.includes(w))});if(!hits.length)continue;total+=hits.length;
-  html+=`<h3>${esc(name)} <span class="s">(${hits.length})</span></h3>`+hits.slice(0,25).map(r=>`<div class="hit" data-t="${t}" data-q="${esc(q)}">${esc(lab(r))}</div>`).join('')+(hits.length>25?`<p class="s">+${hits.length-25} more - open the tab</p>`:'')}
+/* ---------- global search ---------- */
+function gsets(){return [['Orders','o',Object.values(OI),x=>`${x.no} · ${x.type} · ${x.who} · ${x.where} · ${x.status}`,x=>openOrder(x.no)],
+ ['Live Rentals','r',R,r=>`${r.Item} · ${r.Order} · ${isOn(r)?'On rent':'Returned'}`,openRental],['Equipment','e',D.equipment,r=>`${r.Unit} · ${r.Model} · S/N ${r.Serial} · ${r.Holder} · ${r.Status}`,openUnit],
+ ['Tech Assignments','t',D.tech,r=>`${r.Technician} · ${r['Item / note']}`,r=>openRow(r.Technician,r)],['Tech Replies','tr',D.tech_replies,r=>Object.values(r)[0]+' · '+(Object.values(r)[1]||''),r=>openRow(Object.values(r)[0],r)],
+ ['Certs Needed','c',D.certs_needed,r=>`${r['Unit ID']} · ${r['Make / Model']} · ${r.Category}`,r=>openRow(r['Unit ID'],r)]]}
+function gsearch(q){const el=document.getElementById('gres');if(!el)return;const terms=q.toLowerCase().split(/\s+/).filter(Boolean);if(!terms.length){el.innerHTML='<p class="s">Searches orders, rentals, equipment, techs, replies and certs needed.</p>';return}
+ let html='',total=0;const map={};for(const [name,id,rows,lab,open] of gsets()){const hits=rows.filter(r=>{const s=(lab(r)+' '+JSON.stringify(r,(k,v)=>k.startsWith('_')||k==='lines'?undefined:v)).toLowerCase();return terms.every(w=>s.includes(w))});if(!hits.length)continue;total+=hits.length;map[id]=[hits,open];
+  html+=`<h3>${esc(name)} <span class="s">(${hits.length})</span></h3>`+hits.slice(0,25).map((r,i)=>`<div class="hit" data-g="${id}" data-i="${i}">${linkOrders(lab(r))}</div>`).join('')+(hits.length>25?`<p class="s">+${hits.length-25} more - refine the search</p>`:'')}
  el.innerHTML=total?html:'<p>No matches.</p>';
- el.querySelectorAll('.hit').forEach(h=>h.onclick=()=>{tab=h.dataset.t;const k={rentals:'rentals',equipment:'equipment',tech:'tech',certsneeded:'cn',orders:'orders'}[tab];
-  state[k]=state[k]||{q:'',f:{},sort:null,dir:1};state[k].q=h.dataset.q;location.hash=tab;render()})}
+ el.querySelectorAll('.hit').forEach(h=>h.onclick=e=>{if(e.target.closest('a.ord'))return;const [hits,open]=map[h.dataset.g];open(hits[+h.dataset.i])})}
 document.getElementById('gq').addEventListener('input',e=>{if(tab!=='search'){tab='search';render()}else gsearch(e.target.value);const g=document.getElementById('gs');if(g&&document.activeElement!==e.target)g.value=e.target.value});
 document.getElementById('gq').addEventListener('keydown',e=>{if(e.key==='Enter'){tab='search';render()}});
+let rz;window.addEventListener('resize',()=>{clearTimeout(rz);const w=narrow();rz=setTimeout(()=>{if(w!==window._nw){window._nw=w;if(D)render()}},200)});
 
-(async()=>{D=await Auth.start();document.getElementById('who').innerHTML=Auth.live?`<button class="sec sm" onclick="Auth.signOut()">Sign out</button>`:'';render();
- setInterval(()=>{if(tab==='rentals'&&!document.activeElement.matches('input,select'))render()},6*3600e3)})();
-window.addEventListener('hashchange',()=>{const t=location.hash.slice(1);if(t&&t!==tab){tab=t;render()}});
+(async()=>{D=await Auth.start();prep();window._nw=narrow();document.getElementById('who').innerHTML=Auth.live?`<button class="sec sm" onclick="Auth.signOut()">Sign out</button>`:'';render();fromHash();
+ setInterval(()=>{if(tab==='rentals'&&document.getElementById('panel').hidden&&!document.activeElement.matches('input,select')){prep();render()}},6*3600e3)})();
+window.addEventListener('hashchange',()=>{if(!D)return;if(fromHash())return;closePanel();const t=location.hash.slice(1);if(t&&!/=/.test(t)&&t!==tab){tab=t;render()}});
+window.addEventListener('popstate',()=>{if(!D)return;if(!/^#(order|unit|rental)=/.test(location.hash)){const p=document.getElementById('panel');if(!p.hidden){p.hidden=true;p.innerHTML='';document.body.classList.remove('noscroll')}}else fromHash()});

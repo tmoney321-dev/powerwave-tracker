@@ -33,5 +33,7 @@ const Auth=(()=>{
  async function admin(action,body={}){const {data,error}=await sb.functions.invoke('admin-users',{body:{action,...body}});
   if(error){let m=error.message;try{m=(await error.context.json()).error||m}catch(e){}throw new Error(m)}if(data&&data.error)throw new Error(data.error);return data}
  async function changePw(p){if(p.length<10)throw new Error('Password must be 10+ characters');const {error}=await sb.auth.updateUser({password:p});if(error)throw error}
- return {start,signOut,admin,changePw,get live(){return live},get role(){return role},get email(){return email},get isAdmin(){return role==='admin'}};
+ /* Short-lived signed URL for a PDF in the PRIVATE 'order-pdfs' bucket (storage RLS: admin/user only). */
+ async function pdfUrl(name){const {data,error}=await sb.storage.from('order-pdfs').createSignedUrl(name,600);if(error)throw error;return data.signedUrl}
+ return {start,signOut,admin,changePw,pdfUrl,get live(){return live},get role(){return role},get email(){return email},get isAdmin(){return role==='admin'}};
 })();
