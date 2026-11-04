@@ -30,7 +30,7 @@ tr.tag-jan td:nth-child(2){border-left:3px solid #d32f2f}tr.tag-may td:nth-child
 .lbox{background:#fff;border-radius:14px;padding:20px;width:min(420px,92vw);display:flex;flex-direction:column;gap:10px}.row{display:flex;gap:8px;flex-wrap:wrap}
 .toast{position:fixed;bottom:20px;left:50%;transform:translateX(-50%);background:#1b1f24;color:#fff;padding:10px 16px;border-radius:10px;z-index:70}
 @media (max-width:900px){
- nav{top:96px}main{padding:8px}.fl{min-width:46%;flex:1}
+ main{padding:8px}.fl{min-width:46%;flex:1}
  .tw{background:none;box-shadow:none}table,tbody,tr,td{display:block;width:100%}thead{display:none}
  tr{background:#fff;border-radius:12px;margin:8px 0;padding:6px 10px;box-shadow:0 1px 3px #0002}
  td{border:0;padding:3px 0;display:flex;gap:8px}td::before{content:attr(data-l);flex:0 0 38%;color:#5a6573;font-size:12px;font-weight:600}
@@ -96,3 +96,4 @@ dl.kv{display:grid;grid-template-columns:minmax(110px,34%) 1fr;gap:4px 12px;back
 .tw.end,nav.end{-webkit-mask-image:none;mask-image:none}
 @media (max-width:900px){.tw{-webkit-mask-image:none;mask-image:none}}
 @media (min-width:601px) and (max-width:1200px){nav{flex-wrap:wrap;overflow-x:visible;-webkit-mask-image:none;mask-image:none}nav button{padding:7px 11px;font-size:13px}}
+@media (max-width:760px){nav{top:96px}}
