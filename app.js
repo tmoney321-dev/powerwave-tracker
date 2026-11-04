@@ -67,17 +67,21 @@ const dueInfo=e=>{const d=pd(e['Due date']);if(!d)return {k:'nodate',t:'no due d
  return n<0?{k:'over',t:`OVERDUE ${-n}d`,n}:n<=30?{k:'soon',t:`due in ${n}d`,n}:{k:'ok',t:`${n}d left`,n}};
 
 const V={
- rentals(){head('Live Rental Tracker',['Intellirent Asset list','Cal tracker','Order PDFs','Outlook pricing']);
+ rentals(){head('Live Rental Tracker',['Intellirent rental history','Intellirent Asset list','Cal tracker','Order PDFs','Outlook pricing']);
   const R=D.rentals.map(r=>({...r,_c:rentalCalc(r)}));const on=R.filter(r=>String(r.Status).startsWith('ON RENT'));
   const spentOn=on.reduce((a,r)=>a+(r._c.spent||0),0),unk=on.filter(r=>r._c.spent==null);
   const longest=on.filter(r=>r._c.days!=null).sort((a,b)=>b._c.days-a._c.days)[0];
-  const allSpent=R.reduce((a,r)=>a+(r._c.spent||0),0);
   const unpricedOrders=[...new Set(unk.map(r=>r.Order))];
+  const now=TODAY(),yr=String(now.getFullYear()),ym=yr+'-'+String(now.getMonth()+1).padStart(2,'0');
+  const tot=f=>{let a=0,e=0;R.forEach(r=>{if(!f(r)||r._c.spent==null)return;a+=r._c.spent;if(r['Spend kind']!=='actual')e+=r._c.spent});return {a,e}};
+  const kp=(t,lbl)=>`<div class="kpi"><b>${usd(t.a)}</b><span>${lbl}${t.e?` (incl. ${usd(t.e)} estimated)`:' (actual invoiced)'}</span></div>`;
+  const mo=r=>String(r['Out date']||'');
   const k=document.createElement('div');k.className='kpis';k.innerHTML=`
-   <div class="kpi"><b>${on.length}</b><span>items on rent now</span></div>
-   <div class="kpi"><b>${usd(spentOn)}</b><span>spent so far on items on rent (est., pre-tax; ${unk.length} item(s) price unknown)</span></div>
+   ${kp(tot(()=>true),'spent all-time')}
+   ${kp(tot(r=>mo(r).startsWith(yr)),'spent in '+yr)}
+   ${kp(tot(r=>mo(r).startsWith(ym)),'spent this month (went out '+ym+')')}
+   <div class="kpi"><b>${on.length}</b><span>items on rent now · ${usd(spentOn)} accrued so far (estimate, pre-tax; ${unk.length} price unknown)</span></div>
    <div class="kpi"><b>${longest?longest._c.days+' days':'-'}</b><span>longest out${longest?': '+esc(longest.Item)+' ('+esc(longest.Order)+')':''}</span></div>
-   <div class="kpi"><b>${usd(allSpent)}</b><span>all rentals 2026 with a known price (est.)</span></div>
    <div class="kpi warnk"><b>${unpricedOrders.length}</b><span>on-rent orders with price unknown: ${esc(unpricedOrders.join(', '))}</span></div>`;app.append(k);
   const st=state.rentals||(state.rentals={q:'',f:{Status:''},sort:'days',dir:-1});
   app.append(tableView('rentals',R,[
@@ -87,13 +91,17 @@ const V={
    {k:'Out date',label:'Went out',html:r=>`${fmtD(r['Out date'])}${r['Date basis']==='order'?' <span class="s">(order date)</span>':''}`},
    {k:'days',label:'Days out',v:r=>r._c.days},
    {k:'Return/close date',label:'Returned',html:r=>fmtD(r['Return/close date'])},
+   {k:'Billed through',label:'Billed thru',html:r=>fmtD(r['Billed through'])},{k:'Job'},{k:'PO'},{k:'Type'},
    {k:'rate',label:'Rate (net)',v:r=>r['Net daily']!=null?`${usd(r['Net daily'])}/day · ${usd(r['Net monthly'])}/mo`:''},
    {k:'spent',label:'Spent so far',v:r=>r._c.spent,html:r=>r._c.spent!=null?`<b>${usd(r._c.spent)}</b><div class="s">${esc(r._c.basis)}</div>`:`<span class="unk">price unknown</span><div class="s">${esc(r._c.basis)}</div>`},
    {k:'Order',html:r=>`<b>${esc(r.Order)}</b>${r.PDF?pathHTML(r.PDF):'<div class="s">no PDF on file</div>'}`},
    {k:'Intellirent facility',label:'IR facility'}],
-   {what:'rentals (item, tech, order, serial…)',filters:[{k:'Status'},{k:'Who (ordered by)',label:'Who'},{k:'Order'},{k:'Intellirent facility',label:'IR facility'}],
+   {what:'rentals (item, tech, order, serial…)',filters:[{k:'Status'},{k:'Who (ordered by)',label:'Who'},{k:'Job'},{k:'Spend kind',label:'Actual/estimate'},{k:'Type'},{k:'Order'}],
     sort:'days',dir:-1,rowClass:r=>String(r.Status).startsWith('ON RENT')?'r-on':'',
-    note:'ON RENT = in Intellirent\'s 11/4 asset list, or an unidentified item on an open board order. Days out run live to today (or to the return date from Intellirent return confirmations / order close). <b>Spend method:</b> discounted (net) rates from the latest revision of each order email (else the order PDF); spend = the cheaper of net daily × days, or whole 28-day months × net monthly + leftover days × net daily (leftover capped at one month). Pre-tax estimate; no weekly rates or invoices were found. No rate on file = "price unknown" (never guessed). OR152774 and OR149309 are forced to price unknown.'}));
+    note:'<b>Primary source: Intellirent rental history</b> (actual invoiced $, return dates, placed by, ship to, job, PO, billed through). Lines from that report are <b>actual</b>; carried-over-only lines may be partial. ON RENT = in Intellirent\'s 11/4 asset list (or an unidentified item on an open board order); those, and any line without an invoiced amount, are <b>ESTIMATES</b>: net rate from the latest order email (else order PDF), cheaper of net daily × days or 28-day months × net monthly + leftover days, pre-tax, live to today. No rate on file = "price unknown" (never guessed). Monthly/yearly totals are by the date the item went out.'}));
+  const SS=D.spend_summary||{};const sc=[{k:'Key',label:'Group'},{k:'Invoiced',v:r=>r.Invoiced,html:r=>`<b>${usd(r.Invoiced)}</b>`},{k:'Orders'},{k:'Lines'}];
+  [['by_job','Spend by job / facility (actual invoiced)'],['by_person','Spend by person who placed the order (actual invoiced)'],['by_month','Spend by month the item went out (actual invoiced)']].forEach(([key,t])=>{
+   if(SS[key]&&SS[key].length)app.append(tableView('ss_'+key,SS[key],sc,{title:t,what:'groups',sort:key==='by_month'?'Key':'Invoiced',dir:-1}))});
   if(D.quotes&&D.quotes.length)app.append(tableView('quotes',D.quotes,autoCols(D.quotes),{title:'Quotes (not spend)',what:'quotes'}));
  },
  equipment(){head('Owned Equipment',['Cal tracker']);
