@@ -32,7 +32,7 @@ const legend=(people)=>{const d=document.createElement('div');d.className='legen
 const pill=(t,c)=>t?`<span class="pill ${c}">${esc(t)}</span>`:'';
 const isOn=r=>String(r.Status).startsWith('ON RENT');
 const stPill=r=>pill(isOn(r)?'On rent':r.Status==='RETURNED'?'Returned':/LIKELY/.test(r.Status)?'Likely returned':r.Status,isOn(r)?'red':r.Status==='RETURNED'?'green':'amber');
-const narrow=()=>window.matchMedia('(max-width:760px)').matches;
+const narrow=()=>window.matchMedia('(max-width:900px)').matches;
 
 /* ---------- rental math (live from today) ---------- */
 function rentalCalc(r){const out=pd(r['Out date']);const end=pd(r['Return/close date'])||(isOn(r)?TODAY():null);
@@ -292,3 +292,8 @@ let rz;window.addEventListener('resize',()=>{clearTimeout(rz);const w=narrow();r
  setInterval(()=>{if(tab==='rentals'&&document.getElementById('panel').hidden&&!document.activeElement.matches('input,select')){prep();render()}},6*3600e3)})();
 window.addEventListener('hashchange',()=>{if(!D)return;if(fromHash())return;closePanel();const t=location.hash.slice(1);if(t&&!/=/.test(t)&&t!==tab){tab=t;render()}});
 window.addEventListener('popstate',()=>{if(!D)return;if(!/^#(order|unit|rental)=/.test(location.hash)){const p=document.getElementById('panel');if(!p.hidden){p.hidden=true;p.innerHTML='';document.body.classList.remove('noscroll')}}else fromHash()});
+// mark scroll areas that are at their right end (or don't overflow) so the fade hides
+(()=>{const upd=el=>el.classList.toggle('end',el.scrollLeft+el.clientWidth>=el.scrollWidth-2);
+const all=()=>document.querySelectorAll('.tw,nav').forEach(upd);
+document.addEventListener('scroll',e=>{const t=e.target;if(t.classList&&(t.matches('.tw')||t.matches('nav')))upd(t)},true);
+addEventListener('resize',all);new MutationObserver(()=>requestAnimationFrame(all)).observe(document.documentElement,{childList:true,subtree:true});all()})();
