@@ -35,5 +35,12 @@ const Auth=(()=>{
  async function changePw(p){if(p.length<10)throw new Error('Password must be 10+ characters');const {error}=await sb.auth.updateUser({password:p});if(error)throw error}
  /* Short-lived signed URL for a PDF in the PRIVATE 'order-pdfs' bucket (storage RLS: admin/user only). */
  async function pdfUrl(name){const {data,error}=await sb.storage.from('order-pdfs').createSignedUrl(name,600);if(error)throw error;return data.signedUrl}
- return {start,signOut,admin,changePw,pdfUrl,get live(){return live},get role(){return role},get email(){return email},get isAdmin(){return role==='admin'}};
+ /* Person colors (table person_colors: authenticated read, admin write) */
+ async function colors(){if(!sb)return [];const {data,error}=await sb.from('person_colors').select('name,color,aliases').order('name');if(error)throw error;return data||[]}
+ async function saveColor(row){const {error}=await sb.from('person_colors').upsert({...row,updated_at:new Date().toISOString()});if(error)throw error}
+ async function delColor(name){const {error}=await sb.from('person_colors').delete().eq('name',name);if(error)throw error}
+ /* Order PDF index straight from the bucket (so new uploads show without a data rebuild); admin upload (storage RLS: admin insert/update). */
+ async function pdfList(){if(!sb)return null;const out=[];for(let off=0;;off+=1000){const {data,error}=await sb.storage.from('order-pdfs').list('',{limit:1000,offset:off,sortBy:{column:'name',order:'asc'}});if(error)throw error;out.push(...data.filter(f=>f.id));if(data.length<1000)break}return out}
+ async function pdfUpload(name,file,overwrite){const {error}=await sb.storage.from('order-pdfs').upload(name,file,{contentType:'application/pdf',upsert:!!overwrite});if(error)throw error}
+ return {start,signOut,admin,changePw,pdfUrl,colors,saveColor,delColor,pdfList,pdfUpload,get live(){return live},get role(){return role},get email(){return email},get isAdmin(){return role==='admin'}};
 })();

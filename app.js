@@ -20,7 +20,14 @@ const PERSON_COLORS={};
 const PAL=['#5e35b1','#00838f','#6d4c41','#3949ab','#ad1457','#00695c','#7b1fa2','#0277bd','#4e342e','#c2185b','#455a64','#1e88e5','#8e24aa','#00897b','#5d4037','#283593','#d81b60','#006064','#546e7a','#6a1b9a'];
 const pKey=n=>String(n||'').trim().toUpperCase().replace(/\s+/g,' ');
 const NOPERSON=/^(|MISSING|\(NONE\)|\(UNKNOWN\)|NONE|UNASSIGNED|-)$/;
-const pColor=n=>{const k=pKey(n);if(NOPERSON.test(k))return '';if(PERSON_COLORS[k])return PERSON_COLORS[k];let h=0;for(const c of k)h=(h*31+c.charCodeAt(0))>>>0;return PAL[h%PAL.length]};
+/* Admin-edited colors + aliases come from Supabase table person_colors (Admin tab); PERSON_COLORS stays the fallback default. */
+let PC_DB={},PC_ALIAS={},PC_ROWS=[];
+/* Seed = same rows as the person_colors table was pre-filled with; used offline / before the table loads. */
+const PC_SEED=[['Allister Moreno','ALLISTER'],['Corey Palmer'],['David Villalobos','DAVID'],['Didier UsCan','DIDIER|Didier UsCan / PowerWave Svc'],['Jet Garza','JET'],['Jimmy Crawley','JIMMY|Jimmy Crawley / PowerWave Svcs'],['Joe Garza','JOE'],['Kaleb Luttrell','KALEB'],['Kyle Shircliffe','KYLE'],['Laura Shircliffe'],['Matt Bellott'],['Matt Castro'],['Mike Gallagher'],['Nitashanta Hagans','NIT'],['Olivia Hennig','OLIVIA'],['Patrick Arreaga','PATRICK'],['Scott Butler','SCOTT'],['Tristen Jacobs','TRISTEN|Tristan Jacobs|Tristen Jacobs / PowerWave Svcs']].map(([name,a])=>({name,color:null,aliases:a?a.split('|'):[]}));
+function setPersonColors(rows){PC_ROWS=rows||[];PC_DB={};PC_ALIAS={};PC_ROWS.forEach(r=>{const k=pKey(r.name);if(r.color)PC_DB[k]=r.color;(r.aliases||[]).forEach(a=>{PC_ALIAS[pKey(a)]=k})})}
+setPersonColors(PC_SEED);
+const pCanon=n=>{const k=pKey(n);return PC_ALIAS[k]||k};
+const pColor=n=>{const k=pCanon(n);if(NOPERSON.test(k))return '';if(PC_DB[k])return PC_DB[k];if(PERSON_COLORS[k])return PERSON_COLORS[k];let h=0;for(const c of k)h=(h*31+c.charCodeAt(0))>>>0;return PAL[h%PAL.length]};
 const who=n=>{const c=pColor(n);return c?`<span class="who" style="--pc:${c}">${esc(n)}</span>`:esc(n||'')};
 /* Cal tag: tracker field first; else nearest Jan/May/Sep cycle from the cal date month (marked est.) */
 const TAGM={1:'JAN',2:'JAN',12:'JAN',11:'JAN',4:'MAY',5:'MAY',6:'MAY',3:'MAY',8:'SEP',9:'SEP',10:'SEP',7:'SEP'};
@@ -28,7 +35,7 @@ const tagOf=e=>{if(e['Cal tag'])return {t:e['Cal tag'],est:false};const m=+Strin
 const TAGN={JAN:'Red',MAY:'Blue',SEP:'Green'};
 const tagDot=e=>{const g=tagOf(e);return g.t?`<span class="tdot ${TAGC[g.t]}" title="${g.t} cycle · ${TAGN[g.t]} tag${g.est?' (estimated from cal date)':''}"></span>${TAGN[g.t]}${g.est?'<small class="s"> est.</small>':''}`:'<span class="s">—</span>'};
 const legend=(people)=>{const d=document.createElement('div');d.className='legend';
- d.innerHTML=`<span class="s">Tag:</span> <span><span class="tdot jan"></span>Red = Jan</span> <span><span class="tdot may"></span>Blue = May</span> <span><span class="tdot sep"></span>Green = Sep</span>${people&&people.length?` <span class="s">· People:</span> ${[...new Set(people.filter(n=>pColor(n)))].sort().map(who).join(' ')}`:''}`;return d};
+ d.innerHTML=`<span class="s">Tag:</span> <span><span class="tdot jan"></span>Red = Jan</span> <span><span class="tdot may"></span>Blue = May</span> <span><span class="tdot sep"></span>Green = Sep</span>${people&&people.length?` <span class="s">· People:</span> ${(()=>{const m={};people.filter(n=>pColor(n)).forEach(n=>{const k=pCanon(n);const row=PC_ROWS.find(r=>pKey(r.name)===k);m[k]=m[k]||(row?row.name:n)});return Object.values(m).sort()})().map(who).join(' ')}`:''}`;return d};
 const pill=(t,c)=>t?`<span class="pill ${c}">${esc(t)}</span>`:'';
 const isOn=r=>String(r.Status).startsWith('ON RENT');
 const stPill=r=>pill(isOn(r)?'On rent':r.Status==='RETURNED'?'Returned':/LIKELY/.test(r.Status)?'Likely returned':r.Status,isOn(r)?'red':r.Status==='RETURNED'?'green':'amber');
@@ -41,7 +48,7 @@ function rentalCalc(r){const out=pd(r['Out date']);const end=pd(r['Return/close 
  else if(r['Net daily']!=null&&d!=null){const dl=r['Net daily'],mo=r['Net monthly']||dl*20;spent=Math.floor(d/28)*mo+Math.min((d%28)*dl,mo)}
  else if(r['Net daily']!=null)basis='rate known, return date unknown';
  return {days:d,spent,basis,est:r['Spend kind']!=='actual'}}
-let R=[],OI={};   // rentals with calc; order index
+let R=[],OI={},PDFX=null;   // PDFX: live bucket listing (order no -> [file names]) or null offline   // rentals with calc; order index
 function prep(){R=D.rentals.map((r,i)=>({...r,_i:i,_c:rentalCalc(r)}));OI={};
  const get=no=>OI[no]||(OI[no]={no,o:null,lines:[]});
  (D.orders||[]).forEach(o=>get(o.Order).o=o);R.forEach(r=>get(r.Order).lines.push(r));
@@ -51,6 +58,7 @@ function prep(){R=D.rentals.map((r,i)=>({...r,_i:i,_c:rentalCalc(r)}));OI={};
   x.date=o['Order date']||o['Ship date']||L.map(r=>r['Out date']).filter(Boolean).sort()[0]||'';
   x.actual=L.filter(r=>!r._c.est&&r._c.spent!=null).reduce((a,r)=>a+r._c.spent,0);x.estimate=L.filter(r=>r._c.est&&r._c.spent!=null).reduce((a,r)=>a+r._c.spent,0);
   x.total=L.some(r=>r._c.spent!=null)?x.actual+x.estimate:(o['Invoice total']??o['Sale/misc total']??null);
+  x.pdfs=[...new Set([...(o['PDF files']||[]),...((PDFX&&PDFX[x.no])||[])])];
   x.status=L.some(isOn)?'On rent':o.Status||(L.length&&L.every(r=>r.Status==='RETURNED')?'Returned':o.Board||'');})}
 
 /* ---------- simple list: search + <=3 filters (+ More filters), table on desktop, cards on phones ---------- */
@@ -119,7 +127,7 @@ function openOrder(no){no=String(no||'').toUpperCase();const x=OI[no];if(!x){toa
   <div class="lm">${c.spent!=null?`<b>${usd2(c.spent)}</b> ${c.est?pill('estimate','amber'):pill('actual invoiced','green')}`:'<span class="unk">price unknown</span>'}${r['History scope']==='Carried over'?' <span class="s">carried over, may be partial</span>':''}</div>
   ${r['Cal exp']||certs.length?`<div class="lm">Cal cert: ${r['Cal exp']?'expires '+fD(r['Cal exp']):''} ${certs.map(p=>`<span class="path">${esc(p)}</span>`).join('')}</div>`:''}</div>`}).join('');
  const quotes=(D.quotes||[]).filter(q=>(q.Source||'').includes(no)||q.Quote===no);
- const pdfs=o['PDF files']||[];
+ const pdfs=x.pdfs||[];
  const html=`${kv(hdr)}
   <div class="tots"><div><b>${usd2(x.actual)}</b><span>actual invoiced</span></div><div><b>${usd2(x.estimate)}</b><span>estimated</span></div><div><b>${L.length}</b><span>line(s)</span></div></div>
   <h3>Line items</h3>${lines||(o.Items?`<p>${esc(o.Items)}</p>`:'<p class="s">No line items on file.</p>')}
@@ -144,9 +152,9 @@ function fromHash(){const h=decodeURIComponent(location.hash.slice(1));let m;
 
 /* ---------- tabs ---------- */
 const TABS=[['rentals','Live Rentals'],['equipment','Equipment'],['tech','Tech Assignments'],['certsneeded','Certs Needed'],
- ['orders','Intellirent Orders'],['orderlist','Order List'],['search','Global Search'],['users','Users'],['account','Account']];
-let tab=(location.hash||'#rentals').slice(1);if(/=/.test(tab))tab='rentals';
-function nav(){document.getElementById('tabs').innerHTML=TABS.filter(([k])=>k!=='users'||Auth.isAdmin).filter(([k])=>k!=='account'||Auth.live)
+ ['orders','Intellirent Orders'],['orderlist','Order List'],['search','Global Search'],['admin','Admin'],['account','Account']];
+let tab=(location.hash||'#rentals').slice(1);if(/=/.test(tab))tab='rentals';if(tab==='users')tab='admin';
+function nav(){document.getElementById('tabs').innerHTML=TABS.filter(([k])=>k!=='admin'||Auth.isAdmin).filter(([k])=>k!=='account'||Auth.live)
  .map(([k,l])=>`<button role="tab" class="${k===tab?'on':''}" data-t="${k}">${l}</button>`).join('');
  document.querySelectorAll('#tabs button').forEach(b=>b.onclick=()=>{tab=b.dataset.t;location.hash=tab;render()})}
 function render(){nav();app.innerHTML='';(V[tab]||V.rentals)();Combo.scan();window.scrollTo(0,0)}
@@ -237,38 +245,86 @@ const V={
   const box=document.createElement('div');box.innerHTML=`<div class="bar"><input type="search" id="gs" placeholder="Type anything: unit, serial, tech, order #, model…" value="${esc(q)}"></div><div id="gres"></div>`;app.append(box);
   const inp=box.querySelector('#gs');inp.oninput=()=>{document.getElementById('gq').value=inp.value;gsearch(inp.value)};gsearch(q);inp.focus();
  },
- async users(){head('Users');if(!Auth.isAdmin){app.insertAdjacentHTML('beforeend','<p>Admins only.</p>');return}
-  if(!Auth.live){app.insertAdjacentHTML('beforeend','<p class="s">User management needs the Supabase backend (config.js + admin-users Edge Function). In LOCAL DEV mode there are no accounts.</p>')}
-  const box=document.createElement('div');app.append(box);
-  box.innerHTML=`<h2>Create user</h2><div class="bar"><input id="nu_e" type="email" placeholder="Email" autocomplete="off"><input id="nu_n" placeholder="Name (optional)">
-   ${pwField('nu_p','Password (10+ chars)')}<label class="fl"><span>Role</span><select id="nu_r" data-plain><option>user</option><option>admin</option><option>pending</option></select></label><button id="nu_go">Create</button></div>
-   <p class="s">Roles: <b>admin</b> = data + user management, <b>user</b> = data only, <b>pending</b> = no access (use to revoke). Disabled users cannot sign in.</p><h2>Users</h2><div id="ul">Loading…</div>`;
-  bindPw(box);
-  box.querySelector('#nu_go').onclick=()=>act('create',{email:box.querySelector('#nu_e').value.trim(),name:box.querySelector('#nu_n').value.trim(),password:box.querySelector('#nu_p').value,role:box.querySelector('#nu_r').value},'User created');
-  if(!Auth.live){box.querySelector('#ul').textContent='(no backend configured)';return}
-  try{const {users}=await Auth.admin('list');const me=Auth.email;
-   box.querySelector('#ul').innerHTML=users.map(p=>{const dis=p.banned_until&&new Date(p.banned_until)>new Date();const self=p.email===me;
-    return `<div class="card ucard" data-uid="${p.id}"><div><b>${esc(p.name||p.email)}</b> ${p.role==='pending'?'<span class="pill amber">NEEDS APPROVAL</span>':''}${dis?'<span class="pill red">DISABLED</span>':''}${self?'<span class="pill green">you</span>':''}
-     <div class="s">${esc(p.email)} · last sign-in ${p.last_sign_in_at?fmtT(p.last_sign_in_at):'never'}</div></div>
-     <div class="row"><select data-plain class="u_role" ${self?'disabled':''}>${['admin','user','pending'].map(r=>`<option ${r===p.role?'selected':''}>${r}</option>`).join('')}</select>
-     ${pwField('pw_'+p.id,'New password (10+)')}<button class="sec u_pw">Set password</button>
-     ${self?'':`<button class="sec u_dis">${dis?'Enable':'Disable'}</button><button class="sec u_del">Remove</button>`}</div></div>`}).join('');
-   bindPw(box);
-   box.querySelectorAll('.ucard').forEach(c=>{const id=c.dataset.uid;
-    c.querySelector('.u_role').onchange=e=>act('set_role',{user_id:id,role:e.target.value},'Role updated');
-    c.querySelector('.u_pw').onclick=()=>act('set_password',{user_id:id,password:c.querySelector('#pw_'+CSS.escape(id)).value},'Password changed');
-    const d=c.querySelector('.u_dis');if(d)d.onclick=()=>act(d.textContent==='Disable'?'disable':'enable',{user_id:id},'Done');
-    const r=c.querySelector('.u_del');if(r)r.onclick=()=>{if(confirm('Remove this user permanently?'))act('delete',{user_id:id},'User removed')}})}
-  catch(e){box.querySelector('#ul').textContent='Failed: '+e.message}
-  app.append(fold('Sources & data gaps (admin)',sourcesEl()));
- },
+ admin(){head('Admin');if(!Auth.isAdmin){app.insertAdjacentHTML('beforeend','<p>Admins only.</p>');return}
+  const SUB=[['users','Users'],['colors','Employee colors'],['data','Data status'],['pdfs','Order PDFs']];const cur=SUB.some(x=>x[0]===state.adminSub)?state.adminSub:'users';
+  const b=document.createElement('div');b.className='qf adm';b.innerHTML=SUB.map(([k,l])=>`<button class="${k===cur?'on':''}" data-s="${k}">${l}</button>`).join('');
+  b.querySelectorAll('button').forEach(x=>x.onclick=()=>{state.adminSub=x.dataset.s;render()});app.append(b);
+  if(!Auth.live&&cur!=='data')app.insertAdjacentHTML('beforeend','<p class="warn">Offline / local copy: this admin feature needs the live site (Supabase backend). Shown read-only.</p>');
+  const box=document.createElement('div');box.className='admbox';app.append(box);A[cur](box)},
  account(){head('Account');app.insertAdjacentHTML('beforeend',`<p>Signed in as <b>${esc(Auth.email)}</b> · role <b>${esc(Auth.role)}</b></p><div class="row">${pwField('mypw','New password (10+)')}<button class="sec" id="cpw">Change my password</button><button class="sec" id="sout">Sign out</button></div>`);
   bindPw(app);document.getElementById('sout').onclick=Auth.signOut;document.getElementById('cpw').onclick=async()=>{try{await Auth.changePw(document.getElementById('mypw').value);toast('Password changed')}catch(e){toast(e.message)}}}
 };
 const pwField=(id,ph)=>`<span class="pwf"><input id="${id}" type="password" placeholder="${ph}" minlength="10" autocomplete="new-password"><button type="button" class="sec sm pwt" data-for="${id}" aria-label="Show password">Show</button></span>`;
 function bindPw(root){root.querySelectorAll('.pwt').forEach(b=>b.onclick=()=>{const i=document.getElementById(b.dataset.for);const show=i.type==='password';i.type=show?'text':'password';b.textContent=show?'Hide':'Show'})}
 async function act(action,body,ok){if(body.password!==undefined&&body.password.length<10)return toast('Password must be 10+ characters');
- if(!Auth.live)return toast('No backend configured (LOCAL DEV)');try{await Auth.admin(action,body);toast(ok);V.users()}catch(e){toast('Failed: '+e.message)}}
+ if(!Auth.live)return toast('Needs the live site');try{await Auth.admin(action,body);toast(ok);render()}catch(e){toast('Failed: '+e.message)}}
+/* ---------- Admin sub-views ---------- */
+const COLORDEF=n=>{const k=pKey(n);let h=0;for(const c of k)h=(h*31+c.charCodeAt(0))>>>0;return PERSON_COLORS[k]||PAL[h%PAL.length]};
+function peopleSeen(){const c={};const add=n=>{if(blank(n))return;const k=pKey(n);if(NOPERSON.test(k)||/^(OFFICE|LEASE|DAMAGED)/.test(k))return;c[n]=(c[n]||0)+1};
+ (D.equipment||[]).forEach(e=>add(e.Holder));(D.tech||[]).forEach(r=>add(r.Technician));(D.roster||[]).forEach(r=>add(r.Employee));
+ R.forEach(r=>{add(r['Placed by']);add(r['Who (ordered by)'])});(D.orders||[]).forEach(o=>add(o['Ordered by']));(D.board||[]).forEach(r=>add(r['Ordered By']));(D.order_list||[]).forEach(r=>add(r['Ordered By']));return c}
+const A={
+ async users(box){
+  box.innerHTML=`<h2>Add user</h2><div class="bar"><input id="nu_e" type="email" placeholder="Email" autocomplete="off"><input id="nu_n" placeholder="Name (optional)">
+   ${pwField('nu_p','Password (10+ chars)')}<label class="fl"><span>Role</span><select id="nu_r" data-plain><option>user</option><option>admin</option><option>pending</option></select></label><button id="nu_go">Add user</button></div>
+   <p class="s">Roles: <b>admin</b> = data + Admin tab, <b>user</b> = data only, <b>pending</b> = no access (use to revoke). Admin-added users are pre-confirmed and sign in with the password you set. Disabled users cannot sign in.</p><h2>Users</h2><div id="ul">Loading…</div>`;
+  bindPw(box);
+  box.querySelector('#nu_go').onclick=()=>act('create',{email:box.querySelector('#nu_e').value.trim(),name:box.querySelector('#nu_n').value.trim(),password:box.querySelector('#nu_p').value,role:box.querySelector('#nu_r').value},'User added');
+  if(!Auth.live){box.querySelector('#ul').textContent='(no backend - open the live site)';box.querySelectorAll('input,button,select').forEach(e=>e.disabled=true);return}
+  try{const {users}=await Auth.admin('list');const me=Auth.email;
+   box.querySelector('#ul').innerHTML=`<div class="tw"><table class="utab"><thead><tr><th>Name / email</th><th>Role</th><th>Last sign-in</th><th>Password</th><th></th></tr></thead><tbody>${users.map(p=>{const dis=p.banned_until&&new Date(p.banned_until)>new Date();const self=p.email===me;
+    return `<tr class="ucard" data-uid="${p.id}" data-em="${esc(p.email)}"><td data-l="User"><b>${esc(p.name||'—')}</b> ${p.role==='pending'?'<span class="pill amber">NEEDS APPROVAL</span>':''}${dis?'<span class="pill red">DISABLED</span>':''}${self?'<span class="pill green">you</span>':''}<div class="s">${esc(p.email)}</div></td>
+     <td data-l="Role"><select data-plain class="u_role" ${self?'disabled title="You cannot change your own role"':''}>${['admin','user','pending'].map(r=>`<option ${r===p.role?'selected':''}>${r}</option>`).join('')}</select></td>
+     <td data-l="Last sign-in" class="s">${p.last_sign_in_at?fmtT(p.last_sign_in_at):'never'}</td>
+     <td data-l="Password"><span class="row">${pwField('pw_'+p.id,'New password (10+)')}<button class="sec sm u_pw">Set</button></span></td>
+     <td>${self?'':`<span class="row"><button class="sec sm u_dis">${dis?'Enable':'Disable'}</button><button class="sec sm danger u_del">Delete</button></span>`}</td></tr>`}).join('')}</tbody></table></div>`;
+   bindPw(box);
+   box.querySelectorAll('.ucard').forEach(c=>{const id=c.dataset.uid,em=c.dataset.em;
+    c.querySelector('.u_role').onchange=e=>{if(confirm(`Change ${em} to ${e.target.value}?`))act('set_role',{user_id:id,role:e.target.value},'Role updated');else render()};
+    c.querySelector('.u_pw').onclick=()=>act('set_password',{user_id:id,password:c.querySelector('#pw_'+CSS.escape(id)).value},'Password set for '+em);
+    const d=c.querySelector('.u_dis');if(d)d.onclick=()=>{if(confirm(`${d.textContent} ${em}?`))act(d.textContent==='Disable'?'disable':'enable',{user_id:id},'Done')};
+    const r=c.querySelector('.u_del');if(r)r.onclick=()=>{if(confirm(`Delete ${em} permanently? This cannot be undone.`))act('delete',{user_id:id},'User deleted')}})}
+  catch(e){box.querySelector('#ul').textContent='Failed: '+e.message}},
+ colors(box){const seen=peopleSeen();const rows=[...PC_ROWS.map(r=>({...r}))];const known=new Set();rows.forEach(r=>{known.add(pKey(r.name));(r.aliases||[]).forEach(a=>known.add(pKey(a)))});
+  const unmapped=Object.keys(seen).filter(n=>!known.has(pKey(n))).sort();
+  const cnt=r=>[r.name,...(r.aliases||[])].reduce((a,n)=>a+Object.entries(seen).filter(([k])=>pKey(k)===pKey(n)).reduce((x,[,v])=>x+v,0),0);
+  box.innerHTML=`<p class="s">One row per person. Aliases (comma-separated) map other spellings - e.g. ALLISTER, Allister Moreno - to the same person and color. Saved to Supabase (everyone sees it on next load). Blank color = automatic default.</p>
+   <div class="tw"><table class="ctab"><thead><tr><th>Person</th><th>Color</th><th>Aliases</th><th>Rows</th><th></th></tr></thead><tbody>${rows.map((r,i)=>`<tr data-i="${i}"><td data-l="Person"><span class="who" style="--pc:${r.color||COLORDEF(r.name)}">${esc(r.name)}</span></td>
+    <td data-l="Color"><input type="color" class="c_col" value="${r.color||COLORDEF(r.name)}"> <button class="sec sm c_def" ${r.color?'':'disabled'}>Default</button></td>
+    <td data-l="Aliases"><input class="c_al" value="${esc((r.aliases||[]).join(', '))}" placeholder="e.g. FIRST, Other Spelling"></td><td data-l="Rows" class="s">${cnt(r)}</td>
+    <td><span class="row"><button class="sm c_save">Save</button><button class="sec sm danger c_del">Remove</button></span></td></tr>`).join('')}</tbody></table></div>
+   <h3>Add person / alias</h3><div class="bar"><input id="np_n" placeholder="Person (canonical name)"><input type="color" id="np_c" value="#3949ab"><input id="np_a" placeholder="Aliases, comma-separated"><button id="np_go">Add</button></div>
+   ${unmapped.length?`<h3>Names in the data not mapped yet (${unmapped.length})</h3><p class="s">Tap to add as a person, or copy into another person's aliases.</p><div class="legend">${unmapped.map(n=>`<button class="sec sm um" data-n="${esc(n)}">${esc(n)} <small>${seen[n]}</small></button>`).join(' ')}</div>`:''}`;
+  const live=Auth.live;if(!live)box.querySelectorAll('input,button').forEach(e=>e.disabled=true);
+  const save=async(row,msg)=>{try{await Auth.saveColor(row);setPersonColors(await Auth.colors());toast(msg||'Saved');render()}catch(e){toast('Failed: '+e.message)}};
+  const al=v=>v.split(',').map(x=>x.trim()).filter(Boolean);
+  box.querySelectorAll('tbody tr').forEach(tr=>{const r=rows[+tr.dataset.i];let dirty=false;tr.querySelector('.c_col').oninput=e=>{dirty=true;tr.querySelector('.who').style.setProperty('--pc',e.target.value)};
+   tr.querySelector('.c_save').onclick=()=>save({name:r.name,color:dirty?tr.querySelector('.c_col').value:(r.color||null),aliases:al(tr.querySelector('.c_al').value)},'Saved '+r.name);
+   tr.querySelector('.c_def').onclick=()=>save({name:r.name,color:null,aliases:r.aliases||[]},'Reset '+r.name);
+   tr.querySelector('.c_del').onclick=async()=>{if(!confirm(`Remove ${r.name} and its aliases?`))return;try{await Auth.delColor(r.name);setPersonColors(await Auth.colors());render()}catch(e){toast('Failed: '+e.message)}}});
+  box.querySelector('#np_go').onclick=()=>{const n=box.querySelector('#np_n').value.trim();if(!n)return toast('Enter a name');save({name:n,color:box.querySelector('#np_c').value,aliases:al(box.querySelector('#np_a').value)},'Added '+n)};
+  box.querySelectorAll('.um').forEach(b=>b.onclick=()=>{box.querySelector('#np_n').value=b.dataset.n;box.querySelector('#np_n').focus()})},
+ data(box){const ds=[['Equipment',D.equipment],['Live Rentals (lines)',D.rentals],['Intellirent orders',D.orders],['Order list',D.order_list],['Order board',D.board],['Tech assignments',D.tech],['Tech replies',D.tech_replies],['Employee roster',D.roster],['Certs needed',D.certs_needed],['Quotes',D.quotes],['Data gaps',D.gaps]];
+  box.innerHTML=`<div class="kpis"><div class="kpi"><b>${fmtT(D.built)||'?'}</b><span>last snapshot / refresh</span></div><div class="kpi ${D.gaps&&D.gaps.length?'warnk':''}"><b>${(D.gaps||[]).length}</b><span>data gaps</span></div></div>
+   <h3>Row counts</h3><div class="tw"><table><thead><tr><th>Dataset</th><th>Rows</th></tr></thead><tbody>${ds.map(([n,a])=>`<tr><td>${n}</td><td>${(a||[]).length.toLocaleString('en-US')}</td></tr>`).join('')}</tbody></table></div>`;
+  box.append(fold('Sources & data gaps',sourcesEl(),true))},
+ async pdfs(box){const O=Object.values(OI).filter(x=>/^O[RSE]/.test(x.no));const w=O.filter(x=>x.pdfs.length),wo=O.filter(x=>!x.pdfs.length);
+  const files=PDFX?Object.values(PDFX).reduce((a,v)=>a+v.length,0):null;
+  box.innerHTML=`<div class="kpis"><div class="kpi"><b>${w.length}</b><span>orders with a PDF</span></div><div class="kpi warnk"><b>${wo.length}</b><span>orders without a PDF</span></div><div class="kpi"><b>${files??'—'}</b><span>files in order-pdfs bucket${files==null?' (live only)':''}</span></div></div>
+   <h3>Upload order PDFs</h3><p class="s">Name files <b>OR######.pdf</b> (extra copies <b>OR######_2.pdf</b>; OE/OS orders too). They go to the private <b>order-pdfs</b> bucket and show on the order right away - no rebuild.</p>
+   <div class="bar"><input type="file" id="pf" accept="application/pdf,.pdf" multiple><label class="fl"><span>If exists</span><select id="pov" data-plain><option value="">Skip</option><option value="1">Overwrite</option></select></label><button id="pgo">Upload</button></div><div id="plog"></div>
+   <h3>Orders without a PDF</h3>`;
+  box.append(listView('nopdf',wo,{what:'order #',open:x=>openOrder(x.no),sort:'Date',dir:-1,cols:[{k:'no',label:'Order',html:x=>oLink(x.no)},{k:'date',label:'Date',v:x=>x.date},{k:'who',label:'Who',html:x=>who(x.who)},{k:'status',label:'Status'}],filters:[{k:'type',label:'Type'},{k:'year',label:'Year',v:x=>String(x.date).slice(0,4)}]}));
+  if(!Auth.live){box.querySelectorAll('#pf,#pov,#pgo').forEach(e=>e.disabled=true);return}
+  box.querySelector('#pgo').onclick=async()=>{const fs=[...box.querySelector('#pf').files];const log=box.querySelector('#plog');if(!fs.length)return toast('Choose PDF file(s)');
+   const ov=!!box.querySelector('#pov').value;let ok=0;log.innerHTML='';
+   for(const f of fs){const n=f.name.trim().toUpperCase().replace(/\.PDF$/,'.pdf');const line=t=>log.insertAdjacentHTML('beforeend',`<p class="s">${esc(t)}</p>`);
+    if(!/^O[RSE]\d{6}(_\d+)?\.pdf$/.test(n)){line(`✗ ${f.name}: name must be OR######.pdf`);continue}
+    if(f.size>25e6){line(`✗ ${n}: larger than 25 MB`);continue}
+    try{await Auth.pdfUpload(n,f,ov);ok++;line(`✓ ${n} uploaded`)}catch(e){line(`✗ ${n}: ${/exists|Duplicate/i.test(e.message)?'already exists (choose Overwrite)':e.message}`)}}
+   if(ok){await loadPdfIndex();prep();toast(ok+' PDF(s) uploaded');const keep=log.innerHTML;render();const l2=document.getElementById('plog');if(l2)l2.innerHTML=keep}}}
+};
+async function loadPdfIndex(){if(!Auth.live)return;try{const L=await Auth.pdfList();PDFX={};L.forEach(f=>{const m=/^(O[RSE]\d{6})/.exec(f.name);if(m)(PDFX[m[1]]=PDFX[m[1]]||[]).push(f.name)})}catch(e){PDFX=null}}
 function toast(t){const d=document.createElement('div');d.className='toast';d.textContent=t;document.body.append(d);setTimeout(()=>d.remove(),2500)}
 function sourcesEl(){const d=document.createElement('div');
  d.innerHTML=`<h3>Sources</h3>${(D.sources||[]).map(s=>`<div class="line"><b>${esc(s.Source)}</b><div class="lm">${esc(fmtT(s.dropbox_modified||s.file_modified||s.fetched||''))}${s.present===false?' · not present':''}</div></div>`).join('')}
@@ -288,7 +344,7 @@ document.getElementById('gq').addEventListener('input',e=>{if(tab!=='search'){ta
 document.getElementById('gq').addEventListener('keydown',e=>{if(e.key==='Enter'){tab='search';render()}});
 let rz;window.addEventListener('resize',()=>{clearTimeout(rz);const w=narrow();rz=setTimeout(()=>{if(w!==window._nw){window._nw=w;if(D)render()}},200)});
 
-(async()=>{D=await Auth.start();prep();window._nw=narrow();document.getElementById('who').innerHTML=Auth.live?`<button class="sec sm" onclick="Auth.signOut()">Sign out</button>`:'';render();fromHash();
+(async()=>{D=await Auth.start();if(Auth.live){await Promise.all([Auth.colors().then(r=>{if(r.length)setPersonColors(r)}).catch(()=>{}),loadPdfIndex()])}prep();window._nw=narrow();document.getElementById('who').innerHTML=Auth.live?`<button class="sec sm" onclick="Auth.signOut()">Sign out</button>`:'';render();fromHash();
  setInterval(()=>{if(tab==='rentals'&&document.getElementById('panel').hidden&&!document.activeElement.matches('input,select')){prep();render()}},6*3600e3)})();
 window.addEventListener('hashchange',()=>{if(!D)return;if(fromHash())return;closePanel();const t=location.hash.slice(1);if(t&&!/=/.test(t)&&t!==tab){tab=t;render()}});
 window.addEventListener('popstate',()=>{if(!D)return;if(!/^#(order|unit|rental)=/.test(location.hash)){const p=document.getElementById('panel');if(!p.hidden){p.hidden=true;p.innerHTML='';document.body.classList.remove('noscroll')}}else fromHash()});

@@ -97,3 +97,11 @@ dl.kv{display:grid;grid-template-columns:minmax(110px,34%) 1fr;gap:4px 12px;back
 @media (max-width:900px){.tw{-webkit-mask-image:none;mask-image:none}}
 @media (min-width:601px) and (max-width:1200px){nav{flex-wrap:wrap;overflow-x:visible;-webkit-mask-image:none;mask-image:none}nav button{padding:7px 11px;font-size:13px}}
 @media (max-width:760px){nav{top:96px}}
+
+/* Admin tab */
+.qf.adm{margin:6px 0 10px}button.danger{color:#b71c1c;border-color:#e5a4a4}
+.utab td,.ctab td{vertical-align:middle}.utab .pwf input{width:150px}.ctab .c_al{width:100%;min-width:220px}.ctab input[type=color],#np_c{width:44px;height:32px;padding:2px;border-radius:8px;vertical-align:middle}
+.admbox .warn,.warn{margin:6px 0}
+@media (max-width:900px){.utab thead,.ctab thead{display:none}.utab,.utab tbody,.utab tr,.utab td,.ctab,.ctab tbody,.ctab tr,.ctab td{display:block;width:100%}
+ .utab tr,.ctab tr{background:#fff;border-radius:12px;margin:8px 0;padding:8px 10px;box-shadow:0 1px 3px #0002}.utab td,.ctab td{border:0;padding:4px 0}
+ .utab td[data-l]:not([data-l=User])::before,.ctab td[data-l]:not([data-l=Person])::before{content:attr(data-l);display:block;font-size:12px;color:#5a6573}.ctab .c_al{min-width:0}}
