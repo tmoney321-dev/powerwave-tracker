@@ -1,0 +1,10 @@
+# Never publish data, sources, backend, scripts or build artifacts
+data/
+raw/
+backend/
+dist/
+shots/
+*.py
+.env*
+*.key
+__pycache__/
