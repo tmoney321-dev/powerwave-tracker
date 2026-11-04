@@ -15,6 +15,20 @@ const ORD=/\b(O[RSE]\d{6}|SR\d{6}|RS\d{6})\b/g;
 const oLink=no=>no?`<a href="#order=${esc(no)}" class="ord" data-o="${esc(no)}">${esc(no)}</a>`:'';
 const linkOrders=t=>esc(t).replace(ORD,m=>oLink(m));
 const typ=no=>({OR:'Rental',OE:'Exchange',OS:'Sale',SR:'Service',RS:'Service (RSR)'})[String(no).slice(0,2)]||'';
+/* Person colors: deterministic hash into a curated palette (no pure red/amber/green, which mean status). Admin overrides: edit PERSON_COLORS (UPPERCASE name -> hex). */
+const PERSON_COLORS={};
+const PAL=['#5e35b1','#00838f','#6d4c41','#3949ab','#ad1457','#00695c','#7b1fa2','#0277bd','#4e342e','#c2185b','#455a64','#1e88e5','#8e24aa','#00897b','#5d4037','#283593','#d81b60','#006064','#546e7a','#6a1b9a'];
+const pKey=n=>String(n||'').trim().toUpperCase().replace(/\s+/g,' ');
+const NOPERSON=/^(|MISSING|\(NONE\)|\(UNKNOWN\)|NONE|UNASSIGNED|-)$/;
+const pColor=n=>{const k=pKey(n);if(NOPERSON.test(k))return '';if(PERSON_COLORS[k])return PERSON_COLORS[k];let h=0;for(const c of k)h=(h*31+c.charCodeAt(0))>>>0;return PAL[h%PAL.length]};
+const who=n=>{const c=pColor(n);return c?`<span class="who" style="--pc:${c}">${esc(n)}</span>`:esc(n||'')};
+/* Cal tag: tracker field first; else nearest Jan/May/Sep cycle from the cal date month (marked est.) */
+const TAGM={1:'JAN',2:'JAN',12:'JAN',11:'JAN',4:'MAY',5:'MAY',6:'MAY',3:'MAY',8:'SEP',9:'SEP',10:'SEP',7:'SEP'};
+const tagOf=e=>{if(e['Cal tag'])return {t:e['Cal tag'],est:false};const m=+String(e['Cal date']||'').slice(5,7);return m?{t:TAGM[m],est:true}:{t:'',est:false}};
+const TAGN={JAN:'Red',MAY:'Blue',SEP:'Green'};
+const tagDot=e=>{const g=tagOf(e);return g.t?`<span class="tdot ${TAGC[g.t]}" title="${g.t} cycle · ${TAGN[g.t]} tag${g.est?' (estimated from cal date)':''}"></span>${TAGN[g.t]}${g.est?'<small class="s"> est.</small>':''}`:'<span class="s">—</span>'};
+const legend=(people)=>{const d=document.createElement('div');d.className='legend';
+ d.innerHTML=`<span class="s">Tag:</span> <span><span class="tdot jan"></span>Red = Jan</span> <span><span class="tdot may"></span>Blue = May</span> <span><span class="tdot sep"></span>Green = Sep</span>${people&&people.length?` <span class="s">· People:</span> ${[...new Set(people.filter(n=>pColor(n)))].sort().map(who).join(' ')}`:''}`;return d};
 const pill=(t,c)=>t?`<span class="pill ${c}">${esc(t)}</span>`:'';
 const isOn=r=>String(r.Status).startsWith('ON RENT');
 const stPill=r=>pill(isOn(r)?'On rent':r.Status==='RETURNED'?'Returned':/LIKELY/.test(r.Status)?'Likely returned':r.Status,isOn(r)?'red':r.Status==='RETURNED'?'green':'amber');
@@ -119,7 +133,7 @@ function openOrder(no){no=String(no||'').toUpperCase();const x=OI[no];if(!x){toa
 function openRental(r){const c=r._c;openPanel(r.Item,`<p>${stPill(r)} ${oLink(r.Order)}</p>
  <div class="tots"><div><b>${c.spent!=null?usd2(c.spent):'?'}</b><span>${c.spent==null?'price unknown':c.est?'estimate':'actual invoiced'}</span></div><div><b>${c.days??''}</b><span>days</span></div></div>
  ${kv({...r,'Days out':c.days},['Item','Status','Order','Who (ordered by)','Where (ship to / job)'])}<p class="s">${esc(c.basis||'')}</p>`,'rental='+r._i)}
-function openUnit(e){const d=dueInfo(e);openPanel(e.Unit+' · '+e.Model,`<p>${pill(e.Status,e.Status==='MISSING'?'red':'green')} <span class="due ${d.k}">${esc(d.t)}</span> ${tagHTML(e['Cal tag'])}</p>
+function openUnit(e){const d=dueInfo(e);openPanel(e.Unit+' · '+e.Model,`<p>${pill(e.Status,e.Status==='MISSING'?'red':'green')} <span class="due ${d.k}">${esc(d.t)}</span> ${leftHTML(d)} ${tagDot(e)} ${who(e.Holder)}</p>
  ${kv(e,['Certs','Notes'])}${e.Notes?`<h3>Notes</h3><p class="note">${linkOrders(e.Notes)}</p>`:''}${(e.Certs||[]).length?`<h3>Cert file(s)</h3>${e.Certs.map(p=>`<span class="path">${esc(p)}</span>`).join('')}`:'<p class="s">No cert file found.</p>'}`,'unit='+encodeURIComponent(e.Unit+'|'+e.Serial))}
 const openRow=(title,r)=>openPanel(title,kv(r));
 function fromHash(){const h=decodeURIComponent(location.hash.slice(1));let m;
@@ -140,6 +154,13 @@ const fmtT=t=>t?new Date(t).toLocaleString('en-US',{timeZone:'America/Chicago',m
 const head=h=>{const d=document.createElement('div');d.className='hd';d.innerHTML=`<h1>${h}</h1><span class="s">Data as of ${fmtT(D.built)}</span>`;app.append(d)};
 const dueInfo=e=>{const d=pd(e['Due date']);if(!d)return {k:'nodate',t:'no due date',n:null};const n=days(TODAY(),d);
  return n<0?{k:'over',t:`overdue ${-n}d`,n}:n<=30?{k:'soon',t:`due in ${n}d`,n}:{k:'ok',t:`${n}d left`,n}};
+const leftTxt=d=>d.n==null?'—':d.n<0?`Overdue ${-d.n} day${d.n===-1?'':'s'}`:d.n===0?'Due today':`${d.n} day${d.n===1?'':'s'}`;
+const leftHTML=d=>`<span class="left ${d.k}">${leftTxt(d)}</span>`;
+const dueWin=d=>d.n==null?'No date':d.n<0?'Overdue':d.n<=30?'Due in 30 days':'Later';
+const leftCol={k:'_left',label:'Days left',s:x=>x._d.n,v:x=>leftTxt(x._d),html:x=>leftHTML(x._d)};
+const quickDue=(key,E)=>{const st=state[key]||(state[key]={q:'',f:{},sort:'Days left',dir:1,n:100,more:false});const cur=st.f['Due window']||'';
+ const b=document.createElement('div');b.className='qf';b.innerHTML=['','Overdue','Due in 30 days'].map(v=>`<button class="${cur===v?'on':''}" data-v="${v}">${v||'All'} <small>${v?E.filter(e=>dueWin(e._d)===v||(v==='Due in 30 days'&&e._d.k==='soon')).length:E.length}</small></button>`).join('');
+ b.querySelectorAll('button').forEach(x=>x.onclick=()=>{st.f['Due window']=x.dataset.v;render()});return b};
 const kpis=items=>{const k=document.createElement('div');k.className='kpis';k.innerHTML=items.map(([v,l,w])=>`<div class="kpi ${w?'warnk':''}"><b>${v}</b><span>${l}</span></div>`).join('');app.append(k)};
 const groupOrders=(title,L)=>{const nos=[...new Set(L.map(r=>r.Order))].map(n=>OI[n]).sort((a,b)=>String(b.date).localeCompare(String(a.date)));
  openPanel(title,`<p class="s">${nos.length} orders · tap one for detail</p>${nos.map(x=>`<div class="line"><div class="lt">${oLink(x.no)} <span class="s">${fD(x.date)}</span> <b style="float:right">${usd(x.total)}</b></div><div class="lm">${esc(x.who)} · ${esc(x.where)}</div></div>`).join('')}`)};
@@ -154,7 +175,7 @@ const V={
   const st=state.rentals||(state.rentals={q:'',f:{},sort:null,dir:-1,n:100,more:false});
   app.append(listView('rentals',R,{what:'item, order, person, serial',open:openRental,rowClass:r=>isOn(r)?'r-on':'',
    pre:r=>state.rentals.sort?r:[...r].sort((a,b)=>(isOn(b)-isOn(a))||String(b['Out date']).localeCompare(String(a['Out date']))),
-   cols:[{k:'Item',html:r=>`<b>${esc(r.Item)}</b>`},{k:'Order',html:r=>oLink(r.Order)},{k:'Who',v:r=>r['Placed by']&&r['Placed by']!=='(unknown)'?r['Placed by']:(r['Who (ordered by)']!=='(unknown)'?r['Who (ordered by)']:'')},
+   cols:[{k:'Item',html:r=>`<b>${esc(r.Item)}</b>`},{k:'Order',html:r=>oLink(r.Order)},{k:'Who',html:r=>who(r['Placed by']&&r['Placed by']!=='(unknown)'?r['Placed by']:(r['Who (ordered by)']!=='(unknown)'?r['Who (ordered by)']:'')),v:r=>r['Placed by']&&r['Placed by']!=='(unknown)'?r['Placed by']:(r['Who (ordered by)']!=='(unknown)'?r['Who (ordered by)']:'')},
     {k:'Where',v:r=>r.Job||r['Ship to']||r['Where (ship to / job)']||''},{k:'Days out',v:r=>r._c.days},
     {k:'$ spent',v:r=>r._c.spent,html:r=>r._c.spent!=null?`${usd(r._c.spent)}${r._c.est?' <small class="est">est.</small>':''}`:'<span class="unk">?</span>'},
     {k:'Status',v:r=>isOn(r)?'On rent':r.Status==='RETURNED'?'Returned':'Likely returned',html:stPill}],
@@ -174,15 +195,20 @@ const V={
   const E=D.equipment.map(e=>({...e,_d:dueInfo(e)}));const c=f=>E.filter(f).length;
   kpis([[E.length,'units'],[c(e=>e.Status==='MISSING'),'missing (not confirmed)',1],[c(e=>e._d.k==='over'),'cal overdue',1],[c(e=>e._d.k==='soon'),'due within 30 days']]);
   const dl=e=>({over:'Overdue',soon:'Due soon',ok:'OK',nodate:'No date'})[e._d.k];
-  app.append(listView('equipment',E,{what:'unit, model, serial, holder',open:openUnit,rowClass:e=>(e.Status==='MISSING'?'r-miss ':'')+'tag-'+(TAGC[e['Cal tag']]||''),
-   cols:[{k:'Unit',label:'Asset',html:e=>`<b>${esc(e.Unit)}</b>`},{k:'Model'},{k:'Holder'},{k:'Due date',label:'Cal due',s:e=>e['Due date'],v:e=>e['Due date'],html:e=>e['Due date']?`<span class="due ${e._d.k}">${fD(e['Due date'])}</span>`:''},
+  app.append(quickDue('equipment',E));app.append(legend(E.map(e=>e.Holder)));
+  app.append(listView('equipment',E,{what:'unit, model, serial, holder',open:openUnit,rowClass:e=>(e.Status==='MISSING'?'r-miss ':'')+'tag-'+(TAGC[tagOf(e).t]||''),
+   cols:[{k:'Unit',label:'Asset',html:e=>`<b>${esc(e.Unit)}</b>`},{k:'Model'},{k:'Holder',html:e=>who(e.Holder)},{k:'tag',label:'Tag color',s:e=>tagOf(e).t,v:e=>TAGN[tagOf(e).t]||'None',html:tagDot},{k:'Due date',label:'Cal due',s:e=>e['Due date'],v:e=>e['Due date'],html:e=>e['Due date']?`<span class="due ${e._d.k}">${fD(e['Due date'])}</span>`:''},leftCol,
     {k:'Status',html:e=>pill(e.Status==='MISSING'?'Missing':'Confirmed',e.Status==='MISSING'?'red':'green')}],
-   filters:[{k:'Status'},{k:'Holder'},{k:'due',label:'Cal due',v:dl}],more:[{k:'Cal tag'},{k:'Model'}]}));
+   filters:[{k:'Status'},{k:'Holder'},{k:'due',label:'Cal due',v:dl},{k:'tag',label:'Tag color',v:e=>TAGN[tagOf(e).t]||'None'}],more:[{k:'Cal tag'},{k:'Model'},{k:'dw',label:'Due window',v:e=>e._d.k==='soon'?'Due in 30 days':dueWin(e._d)}]}));
  },
  tech(){head('Tech Assignments');
-  app.append(listView('tech',D.tech,{what:'tech, unit, item',open:r=>openRow(r.Technician+' · '+(r.Unit||''),r),
-   cols:[{k:'Technician',label:'Tech',html:r=>`<b>${esc(r.Technician)}</b>`},{k:'Item / note',label:'Equipment',v:r=>String(r['Item / note']||'').replace(/\s*\[(JAN|MAY|SEP)\]\s*$/,'')},{k:'Unit',label:'Asset'}],
-   filters:[{k:'Technician',label:'Tech'},{k:'Category'}],more:[{k:'Cal tag'}]}));
+  const EU={};D.equipment.forEach(e=>{if(e.Unit&&!EU[e.Unit])EU[e.Unit]=e});
+  const T=D.tech.map(r=>{const e=EU[r.Unit];return {...r,_tg:e?tagOf(e).t:r['Cal tag'],'Cal due':e?e['Due date']:'',_d:dueInfo(e||{})}});
+  app.append(quickDue('tech',T));app.append(legend(T.map(r=>r.Technician)));
+  app.append(listView('tech',T,{what:'tech, unit, item',open:r=>openRow(r.Technician+' · '+(r.Unit||''),r),
+   cols:[{k:'Technician',label:'Tech',html:r=>`<b>${who(r.Technician)}</b>`},{k:'Item / note',label:'Equipment',v:r=>String(r['Item / note']||'').replace(/\s*\[(JAN|MAY|SEP)\]\s*$/,'')},{k:'Unit',label:'Asset'},{k:'tag',label:'Tag color',s:r=>r._tg,v:r=>TAGN[r._tg]||'None',html:r=>tagDot({'Cal tag':r._tg})},
+    {k:'Cal due',s:r=>r['Cal due'],v:r=>r['Cal due'],html:r=>r['Cal due']?`<span class="due ${r._d.k}">${fD(r['Cal due'])}</span>`:''},leftCol],
+   filters:[{k:'Technician',label:'Tech'},{k:'Category'},{k:'tag',label:'Tag color',v:r=>TAGN[r._tg]||'None'}],more:[{k:'Cal tag'},{k:'dw',label:'Due window',v:r=>r._d.k==='soon'?'Due in 30 days':dueWin(r._d)}]}));
   const cols=rows=>{const ks=[];rows.forEach(r=>Object.keys(r).forEach(k=>{if(!ks.includes(k)&&!HIDE.test(k))ks.push(k)}));return ks};
   if(D.tech_replies.length){const k=cols(D.tech_replies);app.append(fold('Tech replies ('+D.tech_replies.length+')',listView('replies',D.tech_replies,{what:'replies',open:r=>openRow(r[k[0]],r),cols:k.slice(0,3).map(x=>({k:x}))})))}
   if(D.roster.length)app.append(fold('Employee roster',listView('roster',D.roster,{what:'employees',cols:[{k:'Employee'}]})));
@@ -196,15 +222,15 @@ const V={
  orders(){head('Intellirent Orders');
   const O=Object.values(OI);
   app.append(listView('orders',O,{what:'order #, person, place, item',open:x=>openOrder(x.no),sort:'Date',dir:-1,rowClass:x=>x.status==='On rent'?'r-on':'',
-   cols:[{k:'no',label:'Order',html:x=>oLink(x.no)},{k:'date',label:'Date',v:x=>x.date},{k:'who',label:'Who'},{k:'where',label:'Where'},
+   cols:[{k:'no',label:'Order',html:x=>oLink(x.no)},{k:'date',label:'Date',v:x=>x.date},{k:'who',label:'Who',html:x=>who(x.who)},{k:'where',label:'Where'},
     {k:'total',label:'Total',v:x=>x.total,html:x=>x.total!=null?usd(x.total)+(x.estimate?' <small class="est">est.</small>':''):''},{k:'status',label:'Status'}],
    filters:[{k:'type',label:'Type'},{k:'who',label:'Who'},{k:'status',label:'Status'}],more:[{k:'year',label:'Year',v:x=>String(x.date).slice(0,4)}]}));
  },
  orderlist(){head('Order List & Board');
   app.append(listView('board',D.board,{title:'Intellirent order board (cal tracker)',what:'board',open:r=>openOrder(r['Order No']),
-   cols:[{k:'Order No',label:'Order',html:r=>oLink(r['Order No'])},{k:'Order Date',label:'Date'},{k:'Ordered By',label:'Who'},{k:'Board',label:'Status'}],filters:[{k:'Board',label:'Status'},{k:'Ordered By',label:'Who'}]}));
+   cols:[{k:'Order No',label:'Order',html:r=>oLink(r['Order No'])},{k:'Order Date',label:'Date'},{k:'Ordered By',label:'Who',html:r=>who(r['Ordered By'])},{k:'Board',label:'Status'}],filters:[{k:'Board',label:'Status'},{k:'Ordered By',label:'Who'}]}));
   app.append(listView('ol',D.order_list,{title:'PowerWave Order List',what:'order list',open:r=>OI[r['Order Number']]?openOrder(r['Order Number']):openRow(r['Order Number'],r),sort:'Date',dir:-1,
-   cols:[{k:'Order Number',label:'Order',html:r=>oLink(r['Order Number'])},{k:'Order Date',label:'Date'},{k:'Ordered By',label:'Who'},{k:'Shipping Address',label:'Where'},{k:'Order Status',label:'Status'}],
+   cols:[{k:'Order Number',label:'Order',html:r=>oLink(r['Order Number'])},{k:'Order Date',label:'Date'},{k:'Ordered By',label:'Who',html:r=>who(r['Ordered By'])},{k:'Shipping Address',label:'Where'},{k:'Order Status',label:'Status'}],
    filters:[{k:'Order Status',label:'Status'},{k:'Ordered By',label:'Who'}]}));
  },
  search(){head('Global Search');const q=document.getElementById('gq').value.trim();
