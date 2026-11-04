@@ -51,8 +51,8 @@ function csv(name,rows,cols){const q=v=>{v=v==null?'':Array.isArray(v)?v.join(' 
 const autoCols=rows=>{const ks=[];rows.forEach(r=>Object.keys(r).forEach(k=>{if(!ks.includes(k))ks.push(k)}));return ks.map(k=>({k}))};
 
 /* ---------- tabs ---------- */
-const TABS=[['rentals','Live Rentals'],['equipment','Equipment'],['tech','Tech Assignments'],['certsneeded','Certs Needed'],['certs','Cert & Job Folders'],
- ['orders','Intellirent Orders'],['orderlist','Order List'],['sheets','Other Tracker Tabs'],['search','Global Search'],['sources','Sources & Gaps'],['users','Users'],['account','Account']];
+const TABS=[['rentals','Live Rentals'],['equipment','Equipment'],['tech','Tech Assignments'],['certsneeded','Certs Needed'],
+ ['orders','Intellirent Orders'],['orderlist','Order List'],['search','Global Search'],['sources','Sources & Gaps'],['users','Users'],['account','Account']];
 let tab=(location.hash||'#rentals').slice(1);
 function nav(){document.getElementById('tabs').innerHTML=TABS.filter(([k])=>k!=='users'||Auth.isAdmin).filter(([k])=>k!=='account'||Auth.live)
  .map(([k,l])=>`<button role="tab" class="${k===tab?'on':''}" data-t="${k}">${l}</button>`).join('');
@@ -133,11 +133,6 @@ const V={
   app.append(tableView('cn',D.certs_needed,autoCols(D.certs_needed).map(c=>({...c,html:r=>/date|due|cal/i.test(c.k)?fmtD(r[c.k]):`<div class="note">${esc(r[c.k])}</div>`})),
    {what:'certs needed',filters:[{k:'Category'},{k:'Who has it'}],rowClass:r=>/EXPIRED/i.test(r.Category)?'r-miss':/DONE/i.test(r.Category)?'r-ok':''}));
  },
- certs(){head('Cert Files & Job Folders',['Dropbox folder listings','Intellirent certs']);
-  app.append(tableView('certfiles',D.cert_files,[{k:'Asset'},{k:'Serial'},{k:'Make/Model'},{k:'Due folder'},{k:'Type'},{k:'File'},{k:'Dropbox path',label:'Path',html:r=>pathHTML(r['Dropbox path'])},{k:'Modified',html:r=>fmtD(r.Modified)}],
-   {title:'Cal certs',what:'certs (asset, serial, model…)',filters:[{k:'Type'},{k:'Due folder'}],note:'Paths only (no new Dropbox share links are created). Open them in Dropbox.'}));
-  app.append(tableView('jobs',D.jobs,[{k:'Name'},{k:'Type'},{k:'Dropbox path',label:'Path',html:r=>pathHTML(r['Dropbox path'])},{k:'Modified',html:r=>fmtD(r.Modified)}],{title:'Job folders (POWERWAVE CALIBRATION/JOBS)',what:'jobs'}));
- },
  orders(){head('Intellirent Orders',['Cal tracker','PowerWave Order List','Order PDFs','Intellirent Order list']);
   app.append(tableView('orders',D.orders,[{k:'Order',html:o=>`<b>${esc(o.Order)}</b>${o.Board?`<span class="pill amber">${esc(o.Board)}</span>`:''}`},{k:'Type'},{k:'Ordered by'},
    {k:'Order date',html:o=>fmtD(o['Order date'])},{k:'Ship date',html:o=>fmtD(o['Ship date'])},{k:'Status'},{k:'Status date',html:o=>fmtD(o['Status date'])},
@@ -149,12 +144,6 @@ const V={
  orderlist(){head('Order List & Board (raw)',['PowerWave Order List','Cal tracker']);
   app.append(tableView('board',D.board,autoCols(D.board),{title:'Intellirent order board (cal tracker tab, as of 11/4)',what:'board',filters:[{k:'Board'},{k:'Type'},{k:'Ordered By'}]}));
   app.append(tableView('ol',D.order_list,autoCols(D.order_list).map(c=>({...c,html:r=>/Date/.test(c.k)?fmtD(r[c.k]):esc(r[c.k])})),{title:'PowerWave Order List.xlsx',what:'order list',filters:[{k:'Order Status'},{k:'Ordered By'}]}));
- },
- sheets(){head('Other Cal Tracker Tabs',['Cal tracker']);
-  const names=Object.keys(D.sheets);const st=state._sheet||(state._sheet=names[0]);
-  const d=document.createElement('div');d.className='bar';d.innerHTML=`<label class="fl"><span>Tab</span><select id="shs">${names.map(n=>`<option ${n===st?'selected':''}>${esc(n)}</option>`).join('')}</select></label>`;app.append(d);
-  d.querySelector('select').onchange=e=>{state._sheet=e.target.value;render()};
-  const sh=D.sheets[st];app.append(tableView('sh_'+st,sh.rows,autoCols(sh.rows).map(c=>({...c,html:r=>`<div class="note">${esc(r[c.k])}</div>`})),{title:st,note:esc(sh.title),what:'this tab'}));
  },
  search(){head('Global Search',[]);const q=document.getElementById('gq').value.trim();
   const box=document.createElement('div');box.innerHTML=`<div class="bar"><input type="search" id="gs" placeholder="Type anything: unit, serial, tech, order #, model…" value="${esc(q)}"></div><div id="gres"></div>`;app.append(box);
@@ -201,14 +190,13 @@ function toast(t){const d=document.createElement('div');d.className='toast';d.te
 /* ---------- global search across every dataset ---------- */
 function gsets(){const S=[['Live Rentals','rentals',D.rentals,r=>`${r.Item} · ${r.Order} · ${r.Status}`],['Equipment','equipment',D.equipment,r=>`${r.Unit} · ${r.Model} · S/N ${r.Serial} · ${r.Holder} · ${r.Status}`],
   ['Tech Assignments','tech',D.tech,r=>`${r.Technician} · ${r.Category} · ${r['Item / note']}`],['Tech Replies','tech',D.tech_replies,r=>Object.values(r)[0]+' · '+(Object.values(r)[3]||'')],
-  ['Certs Needed','certsneeded',D.certs_needed,r=>Object.values(r).slice(0,5).join(' · ')],['Cert files','certs',D.cert_files,r=>`${r.Asset} · ${r.File}`],['Job folders','certs',D.jobs,r=>r['Dropbox path']],
-  ['Intellirent Orders','orders',D.orders,r=>`${r.Order} · ${r.Type} · ${r['Ordered by']} · ${r.Status||r.Board} · ${r.Items||''}`]];
- Object.entries(D.sheets).forEach(([n,s])=>S.push(['Tab: '+n,'sheets',s.rows,r=>Object.values(r).filter(Boolean).slice(0,4).join(' · ')]));return S}
-function gsearch(q){const el=document.getElementById('gres');if(!el)return;const terms=q.toLowerCase().split(/\s+/).filter(Boolean);if(!terms.length){el.innerHTML='<p class="s">Searches rentals, equipment, techs, replies, certs, cert files, jobs, orders and every other tracker tab.</p>';return}
+  ['Certs Needed','certsneeded',D.certs_needed,r=>Object.values(r).slice(0,5).join(' · ')],
+  ['Intellirent Orders','orders',D.orders,r=>`${r.Order} · ${r.Type} · ${r['Ordered by']} · ${r.Status||r.Board} · ${r.Items||''}`]];return S}
+function gsearch(q){const el=document.getElementById('gres');if(!el)return;const terms=q.toLowerCase().split(/\s+/).filter(Boolean);if(!terms.length){el.innerHTML='<p class="s">Searches rentals, equipment, techs, replies, certs needed, orders and every other tracker tab.</p>';return}
  let html='',total=0;for(const [name,t,rows,lab] of gsets()){const hits=rows.filter(r=>{const s=JSON.stringify(r).toLowerCase();return terms.every(w=>s.includes(w))});if(!hits.length)continue;total+=hits.length;
   html+=`<h3>${esc(name)} <span class="s">(${hits.length})</span></h3>`+hits.slice(0,25).map(r=>`<div class="hit" data-t="${t}" data-q="${esc(q)}">${esc(lab(r))}</div>`).join('')+(hits.length>25?`<p class="s">+${hits.length-25} more - open the tab</p>`:'')}
  el.innerHTML=total?html:'<p>No matches.</p>';
- el.querySelectorAll('.hit').forEach(h=>h.onclick=()=>{tab=h.dataset.t;const k={sheets:'sh_'+state._sheet}[tab]||{rentals:'rentals',equipment:'equipment',tech:'tech',certsneeded:'cn',certs:'certfiles',orders:'orders'}[tab];
+ el.querySelectorAll('.hit').forEach(h=>h.onclick=()=>{tab=h.dataset.t;const k={rentals:'rentals',equipment:'equipment',tech:'tech',certsneeded:'cn',orders:'orders'}[tab];
   state[k]=state[k]||{q:'',f:{},sort:null,dir:1};state[k].q=h.dataset.q;location.hash=tab;render()})}
 document.getElementById('gq').addEventListener('input',e=>{if(tab!=='search'){tab='search';render()}else gsearch(e.target.value);const g=document.getElementById('gs');if(g&&document.activeElement!==e.target)g.value=e.target.value});
 document.getElementById('gq').addEventListener('keydown',e=>{if(e.key==='Enter'){tab='search';render()}});
