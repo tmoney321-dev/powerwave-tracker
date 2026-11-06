@@ -98,6 +98,7 @@ function csv(name,rows,cols){const q=v=>{v=v==null?'':Array.isArray(v)?v.join(' 
  const t=[cols.map(c=>q(c.label||c.k)).join(','),...rows.map(r=>cols.map(c=>q(c.v?c.v(r):r[c.k])).join(','))].join('\n');
  const a=document.createElement('a');a.href=URL.createObjectURL(new Blob([t],{type:'text/csv'}));a.download=`powerwave_${name}_${new Date().toISOString().slice(0,10)}.csv`;a.click()}
 const fold=(title,el,open)=>{const d=document.createElement('details');d.className='fold';d.open=!!open;d.innerHTML=`<summary>${esc(title)}</summary>`;d.append(el);return d};
+const sortedUnique=a=>[...new Set((a||[]).filter(Boolean))].sort(Combo.numCmp);
 
 /* ---------- detail panel (full-screen sheet on phones, side panel on desktop) ---------- */
 const HIDE=/^(_|Sources?$|Source$|Email source|ConversationID|Conversation ID|PDF$|PDF files|Date basis|Tracker check|Price basis|Spend kind|Sources)/i;
@@ -110,7 +111,7 @@ function openPanel(title,html,hash){const p=document.getElementById('panel');p.i
  p.querySelector('.px').onclick=closePanel;p.querySelector('.pbg').onclick=closePanel;p.querySelector('.px').focus();
  if(hash&&location.hash!=='#'+hash){lastHash=location.hash||'#'+tab;history.pushState(null,'','#'+hash)}return p}
 function closePanel(){const p=document.getElementById('panel');if(p.hidden)return;p.hidden=true;p.innerHTML='';document.body.classList.remove('noscroll');
- if(/^#(order|unit|rental)=/.test(location.hash))history.pushState(null,'',lastHash&&!/=/.test(lastHash)?lastHash:'#'+tab)}
+ if(/^#(order|unit|rental|job)=/.test(location.hash))history.pushState(null,'',lastHash&&!/=/.test(lastHash)?lastHash:'#'+tab)}
 document.addEventListener('keydown',e=>{if(e.key==='Escape')closePanel()});
 document.addEventListener('click',e=>{const a=e.target.closest('a.ord');if(a){e.preventDefault();e.stopPropagation();openOrder(a.dataset.o)}});
 
@@ -144,15 +145,43 @@ function openRental(r){const c=r._c;openPanel(r.Item,`<p>${stPill(r)} ${oLink(r.
 function openUnit(e){const d=dueInfo(e);openPanel(e.Unit+' · '+e.Model,`<p>${pill(e.Status,e.Status==='MISSING'?'red':'green')} <span class="due ${d.k}">${esc(d.t)}</span> ${leftHTML(d)} ${tagDot(e)} ${who(e.Holder)}</p>
  ${kv(e,['Certs','Notes'])}${e.Notes?`<h3>Notes</h3><p class="note">${linkOrders(e.Notes)}</p>`:''}${(e.Certs||[]).length?`<h3>Cert file(s)</h3>${e.Certs.map(p=>`<span class="path">${esc(p)}</span>`).join('')}`:'<p class="s">No cert file found.</p>'}`,'unit='+encodeURIComponent(e.Unit+'|'+e.Serial))}
 const openRow=(title,r)=>openPanel(title,kv(r));
+function openJob(j){
+ if(!j){toast('No job');return}
+ const name=j.Job||'';
+ const hdr={
+  'Job':name,
+  'Rentals':j.Rentals,
+  'Models':j.Models,
+  'Date range':(j.From&&j.To)?(j.From===j.To?j.From:j.From+' → '+j.To):(j.From||j.To||''),
+  'On rent now':j['On rent'],
+  'Who ordered':j['Ordered by summary']||(j['Ordered by']||[]).join(', '),
+  'Ship to':j['Ship to summary']||(j['Ship to']||[]).join('; '),
+  'Job sources':(j.Sources||[]).join(' · ')
+ };
+ const orders=j.Orders||[];
+ const ordHtml=orders.map(o=>{
+  const items=(o.Items||[]).map(it=>`<div class="line ${it.Status==='ON RENT'?'r-on':''}"><div class="lt"><b>${esc(it.Model||'')}</b> ${pill(it.Status,it.Status==='ON RENT'?'green':it.Status==='Returned'?'':'amber')}</div>
+   <div class="lm">${[it.Serial&&('S/N '+esc(it.Serial)),it.Barcode&&('Barcode '+esc(it.Barcode)),it['Ship date']&&('out '+fD(it['Ship date'])),it['Return date']&&('back '+fD(it['Return date']))].filter(Boolean).join(' · ')}</div></div>`).join('');
+  return `<div class="job-ord"><div class="lt">${oLink(o.Order)} <span class="s">${esc(o.Date||'')}</span> ${who(o['Ordered by'])} ${pill(o.Source,o.Source==='Intellirent'?'green':(o.Source||'').startsWith('inferred')?'amber':'')} ${o['On rent']?pill(o['On rent']+' on rent','green'):''}</div>
+   <div class="lm">${esc(o['Ship to']||'')}</div>${items}</div>`}).join('')||'<p class="s">No orders</p>';
+ const pw=j['Powerwave equipment']||[];
+ const pwHtml=pw.length?`<h3>Powerwave-owned equipment on this job</h3>${pw.map(e=>`<div class="line"><div class="lt"><b>${esc(e.Unit||e.Serial||'')}</b> ${esc(e.Model||'')} ${pill(e.Status||'',e.Status==='MISSING'?'red':'green')}</div>
+  <div class="lm">${[e.Serial&&('S/N '+esc(e.Serial)),e.Holder&&who(e.Holder)].filter(Boolean).join(' · ')}</div></div>`).join('')}`:'';
+ const html=`${kv(hdr)}
+  <p class="s">No dollar amounts on this tab. Job links from Intellirent / order copy / ship-to / Desktop job folder.</p>
+  <h3>Orders (${orders.length})</h3>${ordHtml}${pwHtml}`;
+ openPanel(name==='Unassigned'?'Unassigned orders':('Job · '+name),html,'job='+encodeURIComponent(name));
+}
 function fromHash(){const h=decodeURIComponent(location.hash.slice(1));let m;
  if((m=/^order=(.+)$/.exec(h)))return openOrder(m[1]),true;
+ if((m=/^job=(.+)$/.exec(h))){const name=m[1];const jb=(D.job_board&&D.job_board.jobs||[]).find(j=>j.Job===name);if(jb){if(tab!=='jobs'){tab='jobs';render()}return openJob(jb),true}toast('Job not found');return true}
  if((m=/^rental=(\d+)$/.exec(h))&&R[+m[1]])return openRental(R[+m[1]]),true;
  if((m=/^unit=(.*)\|(.*)$/.exec(h))){const e=D.equipment.find(e=>e.Unit===m[1]&&e.Serial===m[2]);if(e)return openUnit(e),true}
  return false}
 
 /* ---------- tabs ---------- */
 const TABS=[['rentals','Live Rentals'],['equipment','Equipment'],['tech','Tech Assignments'],['certsneeded','Certs Needed'],
- ['orders','Intellirent Orders'],['orderlist','Order List'],['search','Global Search'],['spend','Rental Spend'],['admin','Admin'],['account','Account']];
+ ['orders','Intellirent Orders'],['orderlist','Order List'],['jobs','Jobs'],['search','Global Search'],['spend','Rental Spend'],['admin','Admin'],['account','Account']];
 let tab=(location.hash||'#rentals').slice(1);if(/=/.test(tab))tab='rentals';if(tab==='users')tab='admin';
 function nav(){document.getElementById('tabs').innerHTML=TABS.filter(([k])=>(k!=='admin'&&k!=='spend')||Auth.isAdmin).filter(([k])=>k!=='account'||Auth.live)
  .map(([k,l])=>`<button role="tab" class="${k===tab?'on':''}" data-t="${k}">${l}</button>`).join('');
@@ -239,6 +268,61 @@ const V={
   const inp=box.querySelector('#gs');inp.oninput=()=>{document.getElementById('gq').value=inp.value;gsearch(inp.value)};gsearch(q);inp.focus();
  },
 
+
+ jobs(){head('Jobs');
+  const JB=D.job_board||{};const all=JB.jobs||[];
+  if(!all.length){app.insertAdjacentHTML('beforeend','<p class="warn">No job board published yet. Rebuild site data.</p>');return}
+  const c=JB.counts||{};
+  const top=document.createElement('div');top.className='kpis';
+  top.innerHTML=[['jobs',c.jobs||0],['active (on rent)',c.active_jobs||0],['rental orders',c.orders||0],['unassigned orders',c.unassigned_orders||0]]
+   .map(([l,v])=>`<div class="kpi"><b>${v}</b><span>${l}</span></div>`).join('');
+  app.append(top);
+  app.insertAdjacentHTML('beforeend',`<p class="s">${esc(JB.note||'Job assignments from Intellirent / order copy / ship-to / Desktop. No dollar amounts.')}</p>`);
+  const yr=state.jobsYear||'all';
+  const years=[...new Set(all.flatMap(j=>j.Years||[]))].sort((a,b)=>b-a);
+  const filt=document.createElement('div');filt.className='qf';
+  filt.innerHTML=[['all','All years'],...years.map(y=>[String(y),String(y)])].map(([v,l])=>`<button class="${yr===v?'on':''}" data-y="${v}">${l}</button>`).join('');
+  filt.querySelectorAll('button').forEach(b=>b.onclick=()=>{state.jobsYear=b.dataset.y;render()});
+  app.append(filt);
+  let jobs=all;
+  if(yr!=='all')jobs=all.map(j=>{
+   const ol=(j.Orders||[]).filter(o=>String(o.Year)===String(yr));
+   if(!ol.length)return null;
+   const models=sortedUnique(ol.flatMap(o=>(o.Items||[]).map(i=>i.Model).filter(Boolean)));
+   const whoL=sortedUnique(ol.flatMap(o=>o['Ordered by list']||[]));
+   const ships=sortedUnique(ol.flatMap(o=>o['Ship to list']||[]));
+   const dates=ol.map(o=>o.Date).filter(Boolean).sort();
+   const on=ol.reduce((s,o)=>s+(o['On rent']||0),0);
+   return {...j,Orders:ol,Rentals:ol.length,Models:models.length,'Model list':models,
+    From:dates[0]||'',To:dates[dates.length-1]||'',
+    'Ordered by':whoL,'Ordered by summary':whoL.slice(0,8).join(', ')+(whoL.length>8?'…':''),
+    'Ship to':ships,'Ship to summary':ships.slice(0,3).join('; ')+(ships.length>3?'…':''),
+    'On rent':on,Active:on>0,Years:[+yr],Sources:sortedUnique(ol.map(o=>o.Source))};
+  }).filter(Boolean);
+  const rows=jobs.map(j=>({...j,
+   _active:j.Active?'Active (on rent)':'Inactive',
+   _range:(j.From&&j.To)?(j.From===j.To?j.From:j.From+' → '+j.To):(j.From||j.To||''),
+   _who:j['Ordered by summary']||'',
+   _ship:j['Ship to summary']||'',
+   _src:(j.Sources||[]).join(', ')
+  }));
+  app.append(listView('jobs',rows,{title:'Jobs',what:'job, who, ship-to, model, order',sort:'On rent',dir:-1,
+   open:r=>openJob(r),
+   rowClass:r=>r.Job==='Unassigned'?'':(r.Active?'r-on':''),
+   pre:r=>{const ua=r.filter(x=>x.Job==='Unassigned');return r.filter(x=>x.Job!=='Unassigned').concat(ua)},
+   cols:[
+    {k:'Job',html:r=>r.Job==='Unassigned'?`<span class="pill amber">Unassigned</span>`:`<b>${esc(r.Job)}</b>`},
+    {k:'Rentals'},
+    {k:'Models',html:r=>`<span title="${esc((r['Model list']||[]).join(', '))}">${r.Models}</span>`},
+    {k:'_range',label:'Dates'},
+    {k:'_who',label:'Who ordered',html:r=>who(r._who)},
+    {k:'_ship',label:'Ship to'},
+    {k:'On rent',label:'On rent',html:r=>r['On rent']?`<b>${r['On rent']}</b>`:'0'},
+    {k:'_src',label:'Source',html:r=>(r.Sources||[]).map(s=>pill(s,s==='Intellirent'?'green':(s||'').startsWith('inferred')?'amber':'')).join(' ')}
+   ],
+   filters:[{k:'_active',label:'Status'}]
+  }));
+ },
  spend(){head('Rental Spend');if(!Auth.isAdmin){app.insertAdjacentHTML('beforeend','<p>Admins only.</p>');return}
   const box=document.createElement('div');box.id='spendbox';box.innerHTML='<p class="s">Loading admin spend…</p>';app.append(box);
   (async()=>{
@@ -409,7 +493,7 @@ let rz;window.addEventListener('resize',()=>{clearTimeout(rz);const w=narrow();r
 (async()=>{D=await Auth.start();if(Auth.live){await Promise.all([Auth.colors().then(r=>{if(r.length)setPersonColors(r)}).catch(()=>{}),loadPdfIndex()])}prep();window._nw=narrow();document.getElementById('who').innerHTML=Auth.live?`<button class="sec sm" onclick="Auth.signOut()">Sign out</button>`:'';render();fromHash();
  setInterval(()=>{if(tab==='rentals'&&document.getElementById('panel').hidden&&!document.activeElement.matches('input,select')){prep();render()}},6*3600e3)})();
 window.addEventListener('hashchange',()=>{if(!D)return;if(fromHash())return;closePanel();const t=location.hash.slice(1);if(t&&!/=/.test(t)&&t!==tab){tab=t;render()}});
-window.addEventListener('popstate',()=>{if(!D)return;if(!/^#(order|unit|rental)=/.test(location.hash)){const p=document.getElementById('panel');if(!p.hidden){p.hidden=true;p.innerHTML='';document.body.classList.remove('noscroll')}}else fromHash()});
+window.addEventListener('popstate',()=>{if(!D)return;if(!/^#(order|unit|rental|job)=/.test(location.hash)){const p=document.getElementById('panel');if(!p.hidden){p.hidden=true;p.innerHTML='';document.body.classList.remove('noscroll')}}else fromHash()});
 // mark scroll areas that are at their right end (or don't overflow) so the fade hides
 (()=>{const upd=el=>el.classList.toggle('end',el.scrollLeft+el.clientWidth>=el.scrollWidth-2);
 const all=()=>document.querySelectorAll('.tw,nav').forEach(upd);
