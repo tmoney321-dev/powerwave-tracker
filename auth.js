@@ -42,5 +42,12 @@ const Auth=(()=>{
  /* Order PDF index straight from the bucket (so new uploads show without a data rebuild); admin upload (storage RLS: admin insert/update). */
  async function pdfList(){if(!sb)return null;const out=[];for(let off=0;;off+=1000){const {data,error}=await sb.storage.from('order-pdfs').list('',{limit:1000,offset:off,sortBy:{column:'name',order:'asc'}});if(error)throw error;out.push(...data.filter(f=>f.id));if(data.length<1000)break}return out}
  async function pdfUpload(name,file,overwrite){const {error}=await sb.storage.from('order-pdfs').upload(name,file,{contentType:'application/pdf',upsert:!!overwrite});if(error)throw error}
- return {start,signOut,admin,changePw,pdfUrl,colors,saveColor,delColor,pdfList,pdfUpload,get live(){return live},get role(){return role},get email(){return email},get isAdmin(){return role==='admin'}};
+ /* Admin-only rental spend (table public.admin_spend; RLS: my_role()='admin'). Never stored in site_data. */
+ async function adminSpend(){
+  if(!live){if(C.LOCAL_DEV){try{const r=await fetch('data/admin_spend.json',{cache:'no-store'});if(r.ok)return r.json()}catch(e){}return null}
+   return null}
+  if(role!=='admin')return null;
+  const {data,error}=await sb.from('admin_spend').select('data,built_at').eq('id','current').maybeSingle();
+  if(error)throw error;return data?data.data:null}
+ return {start,signOut,admin,changePw,pdfUrl,colors,saveColor,delColor,pdfList,pdfUpload,adminSpend,get live(){return live},get role(){return role},get email(){return email},get isAdmin(){return role==='admin'}};
 })();

@@ -152,9 +152,9 @@ function fromHash(){const h=decodeURIComponent(location.hash.slice(1));let m;
 
 /* ---------- tabs ---------- */
 const TABS=[['rentals','Live Rentals'],['equipment','Equipment'],['tech','Tech Assignments'],['certsneeded','Certs Needed'],
- ['orders','Intellirent Orders'],['orderlist','Order List'],['search','Global Search'],['admin','Admin'],['account','Account']];
+ ['orders','Intellirent Orders'],['orderlist','Order List'],['search','Global Search'],['spend','Rental Spend'],['admin','Admin'],['account','Account']];
 let tab=(location.hash||'#rentals').slice(1);if(/=/.test(tab))tab='rentals';if(tab==='users')tab='admin';
-function nav(){document.getElementById('tabs').innerHTML=TABS.filter(([k])=>k!=='admin'||Auth.isAdmin).filter(([k])=>k!=='account'||Auth.live)
+function nav(){document.getElementById('tabs').innerHTML=TABS.filter(([k])=>(k!=='admin'&&k!=='spend')||Auth.isAdmin).filter(([k])=>k!=='account'||Auth.live)
  .map(([k,l])=>`<button role="tab" class="${k===tab?'on':''}" data-t="${k}">${l}</button>`).join('');
  document.querySelectorAll('#tabs button').forEach(b=>b.onclick=()=>{tab=b.dataset.t;location.hash=tab;render()})}
 function render(){nav();app.innerHTML='';(V[tab]||V.rentals)();Combo.scan();window.scrollTo(0,0)}
@@ -189,15 +189,8 @@ const V={
     {k:'Status',v:r=>isOn(r)?'On rent':r.Status==='RETURNED'?'Returned':'Likely returned',html:stPill}],
    filters:[{k:'Status',v:r=>isOn(r)?'On rent':r.Status==='RETURNED'?'Returned':'Likely returned'},{k:'Who',v:r=>r['Placed by']||r['Who (ordered by)']},{k:'Year',v:r=>String(r['Out date']||'').slice(0,4)}],
    more:[{k:'Job'},{k:'Type'},{k:'Spend',v:r=>r._c.spent==null?'Price unknown':r._c.est?'Estimate':'Actual'},{k:'Intellirent facility',label:'IR facility'}]}));
-  const SS=D.spend_summary||{};
-  [['by_job','Spend by job / facility',r=>r.Job?'Job: '+r.Job:r['Ship to']?'Ship to: '+r['Ship to']:''],['by_person','Spend by person',r=>r['Placed by']],['by_month','Spend by month',r=>String(r['Out date']||'').slice(0,7)]].forEach(([k,t,kf])=>{
-   if(!SS[k]||!SS[k].length)return;const norm=s=>String(s||'').toLowerCase().replace(/^(job|ship to): /,'');
-   const el=listView('ss_'+k,SS[k],{what:'groups',sort:k==='by_month'?'Group':'Invoiced',dir:-1,
-    open:g=>groupOrders(t+': '+g.Key,R.filter(r=>!r._c.est&&norm(kf(r))===norm(g.Key))),
-    cols:[{k:'Key',label:'Group'},{k:'Invoiced',v:r=>r.Invoiced,html:r=>`<b>${usd(r.Invoiced)}</b>`},{k:'Orders'}]});
-   app.append(fold(t+' (actual invoiced)',el))});
   if(D.quotes&&D.quotes.length)app.append(fold('Quotes (not spend)',listView('quotes',D.quotes,{what:'quotes',open:q=>openRow('Quote '+q.Quote,q),cols:[{k:'Quote'},{k:'Item'},{k:'Line total'},{k:'Received',v:q=>fD(String(q.Received).slice(0,10))}]})));
-  app.append(fold('How spend is calculated',Object.assign(document.createElement('p'),{className:'s',innerHTML:'Actual = invoiced amount from Intellirent\'s rental history (carried-over-only lines may be partial). Items still on rent, and lines with no invoiced amount, are <b>estimates</b>: net rate from the latest order email (else the order PDF), cheaper of daily × days or 28-day months × monthly + leftover days, pre-tax, live to today. No rate on file = price unknown (never guessed). Month/year totals use the date the item went out.'})));
+  app.append(fold('How on-rent spend is estimated',Object.assign(document.createElement('p'),{className:'s',innerHTML:'Running totals for actual rental spend (by year, model, person, and job) live on the admin-only <b>Rental Spend</b> tab. Here, items still on rent without an invoiced amount are <b>estimates</b> from order rates (never invented). No rate on file = price unknown.'})));
  },
  equipment(){head('Equipment');
   const E=D.equipment.map(e=>({...e,_d:dueInfo(e)}));const c=f=>E.filter(f).length;
@@ -245,6 +238,57 @@ const V={
   const box=document.createElement('div');box.innerHTML=`<div class="bar"><input type="search" id="gs" placeholder="Type anything: unit, serial, tech, order #, model…" value="${esc(q)}"></div><div id="gres"></div>`;app.append(box);
   const inp=box.querySelector('#gs');inp.oninput=()=>{document.getElementById('gq').value=inp.value;gsearch(inp.value)};gsearch(q);inp.focus();
  },
+
+ spend(){head('Rental Spend');if(!Auth.isAdmin){app.insertAdjacentHTML('beforeend','<p>Admins only.</p>');return}
+  const box=document.createElement('div');box.id='spendbox';box.innerHTML='<p class="s">Loading admin spend…</p>';app.append(box);
+  (async()=>{
+   let S=null;try{S=await Auth.adminSpend()}catch(e){box.innerHTML=`<p class="warn">Could not load spend: ${esc(e.message)}</p>`;return}
+   if(!S){box.innerHTML='<p class="warn">No admin spend published yet (rebuild + publish admin_spend).</p>';return}
+   const yr=state.spendYear||'all';
+   const pick=(row)=>{if(yr==='all'||!row.years)return row;const y=row.years[yr];if(!y)return {...row,Rentals:0,'Rental days':0,Spend:0,'Avg monthly spend':0,'Peak units':0,Lines:0,'No invoice':0,'Zero invoice':0};
+    return {...row,Rentals:y.Rentals,'Rental days':y['Rental days'],Spend:y.Spend,'Avg monthly spend':y['Avg monthly spend']||0,'Peak units':y['Peak units']||0,Lines:y.Lines,'No invoice':y['No invoice']||0,'Zero invoice':y['Zero invoice']||0}};
+   const years=S.years||[];const all=S.all_time||{};
+   box.innerHTML='';
+   const top=document.createElement('div');top.className='kpis';
+   top.innerHTML=[['known rental spend (all time)',usd2(all.spend)],['rental orders (OR/OE)',all.rentals],['rental days',all.rental_days.toLocaleString()],['avg / month (lifetime)',usd2(all.avg_monthly_spend)]]
+     .map(([l,v])=>`<div class="kpi"><b>${v}</b><span>${l}</span></div>`).join('');
+   box.append(top);
+   const yc=document.createElement('div');yc.className='kpis';
+   yc.innerHTML=years.map(y=>`<div class="kpi"><b>${usd2(y.spend)}</b><span>${y.year}${y.year===new Date().getFullYear()?' YTD':''} · ${y.rentals} rentals · ${y.rental_days.toLocaleString()} days<br>avg ${usd2(y.avg_monthly_spend)}/mo</span></div>`).join('');
+   box.append(yc);
+   // Year filter
+   const filt=document.createElement('div');filt.className='qf';
+   filt.innerHTML=[['all','All time'],...years.map(y=>[String(y.year),String(y.year)+(y.year===new Date().getFullYear()?' YTD':'')])].map(([v,l])=>`<button class="${yr===v?'on':''}" data-y="${v}">${l}</button>`).join('');
+   filt.querySelectorAll('button').forEach(b=>b.onclick=()=>{state.spendYear=b.dataset.y;render()});
+   box.append(filt);
+   const models=(S.by_model||[]).map(pick).filter(r=>r.Lines||r.Rentals||r.Spend).sort((a,b)=>b.Spend-a.Spend);
+   box.append(listView('spend_models',models,{title:'Spend by model',what:'model',sort:'Spend',dir:-1,
+    cols:[{k:'Model',html:r=>`<b>${esc(r.Model)}</b>`},{k:'Rentals'},{k:'Rental days',label:'Days'},{k:'Spend',v:r=>r.Spend,html:r=>`<b>${usd2(r.Spend)}</b>`},
+     {k:'Avg monthly spend',label:'Avg / mo',v:r=>r['Avg monthly spend'],html:r=>usd2(r['Avg monthly spend'])},{k:'Peak units',label:'Peak'},
+     {k:'No invoice',label:'No $',html:r=>{const n=(r['No invoice']||0)+(r['Zero invoice']||0);return n?pill(String(n),'amber'):''}}],
+    filters:[{k:'flag',label:'Invoice',v:r=>((r['No invoice']||0)+(r['Zero invoice']||0))?'Has $0 / blank':'All priced'}]}));
+   const people=(S.by_person||[]).map(pick).filter(r=>r.Lines||r.Rentals||r.Spend).sort((a,b)=>b.Spend-a.Spend);
+   box.append(listView('spend_people',people,{title:'Spend by person',what:'person',sort:'Spend',dir:-1,
+    cols:[{k:'Key',label:'Person',html:r=>who(r.Key)},{k:'Rentals'},{k:'Rental days',label:'Days'},{k:'Spend',v:r=>r.Spend,html:r=>`<b>${usd2(r.Spend)}</b>`},{k:'Lines'}]}));
+   const jobs=(S.by_job||[]).map(pick).filter(r=>r.Lines||r.Rentals||r.Spend).sort((a,b)=>b.Spend-a.Spend);
+   box.append(listView('spend_jobs',jobs,{title:'Spend by job / location',what:'job or ship-to',sort:'Spend',dir:-1,
+    cols:[{k:'Key',label:'Job / ship to'},{k:'Rentals'},{k:'Rental days',label:'Days'},{k:'Spend',v:r=>r.Spend,html:r=>`<b>${usd2(r.Spend)}</b>`},{k:'Lines'}]}));
+   if(S.service){const sv=S.service;box.append(fold('Service / calibration (excluded from rental spend)',Object.assign(document.createElement('p'),{className:'s',
+    innerHTML:`${sv.orders||0} service orders · ${sv.lines||0} lines · invoiced ${usd2(sv.spend||0)}. ${esc(sv.note||'')}`})))}
+   if(S.flagged_no_invoice&&S.flagged_no_invoice.length){
+    box.append(fold(`Flagged: no invoice value (${S.flagged_no_invoice.length} lines — $0 / blank, not guessed)`,
+     listView('spend_flagged',S.flagged_no_invoice,{what:'flagged lines',sort:'Order',dir:1,
+      cols:[{k:'Order',html:r=>oLink(r.Order)},{k:'Model'},{k:'Flag',html:r=>pill(r.Flag,r.Flag.startsWith('no')?'amber':'')},{k:'Days'},{k:'Placed by',html:r=>who(r['Placed by'])},{k:'Job / ship to'}],
+      filters:[{k:'Flag'},{k:'Placed by'}]}),false))}
+   const cc=S.cross_check||{};
+   box.append(fold('Source & cross-check',Object.assign(document.createElement('p'),{className:'s',innerHTML:
+    `Source: Intellirent rental history (OR/OE only). Built ${esc(S.built||'')}. Known spend <b>${usd2(cc.history_known_spend)}</b> across <b>${cc.history_orders}</b> orders.`+
+    (cc.explanation?`<br>${esc(cc.explanation)}`:'')+
+    `<br>Sales (OS) and service/cal (SR/SRV) are excluded. Blank invoice lines are flagged; $0 lines are billed no-charge (laptops, lead sets) and count as $0 — never estimated.`})));
+   Combo.scan();
+  })();
+ },
+
  admin(){head('Admin');if(!Auth.isAdmin){app.insertAdjacentHTML('beforeend','<p>Admins only.</p>');return}
   const SUB=[['users','Users'],['colors','Employee colors'],['data','Data status'],['pdfs','Order PDFs']];const cur=SUB.some(x=>x[0]===state.adminSub)?state.adminSub:'users';
   const b=document.createElement('div');b.className='qf adm';b.innerHTML=SUB.map(([k,l])=>`<button class="${k===cur?'on':''}" data-s="${k}">${l}</button>`).join('');
