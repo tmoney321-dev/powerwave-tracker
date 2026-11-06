@@ -155,20 +155,19 @@ function openJob(j){
   'Date range':(j.From&&j.To)?(j.From===j.To?j.From:j.From+' → '+j.To):(j.From||j.To||''),
   'On rent now':j['On rent'],
   'Who ordered':j['Ordered by summary']||(j['Ordered by']||[]).join(', '),
-  'Ship to':j['Ship to summary']||(j['Ship to']||[]).join('; '),
-  'Job sources':(j.Sources||[]).join(' · ')
+  'Ship to':j['Ship to summary']||(j['Ship to']||[]).join('; ')
  };
  const orders=j.Orders||[];
  const ordHtml=orders.map(o=>{
   const items=(o.Items||[]).map(it=>`<div class="line ${it.Status==='ON RENT'?'r-on':''}"><div class="lt"><b>${esc(it.Model||'')}</b> ${pill(it.Status,it.Status==='ON RENT'?'green':it.Status==='Returned'?'':'amber')}</div>
    <div class="lm">${[it.Serial&&('S/N '+esc(it.Serial)),it.Barcode&&('Barcode '+esc(it.Barcode)),it['Ship date']&&('out '+fD(it['Ship date'])),it['Return date']&&('back '+fD(it['Return date']))].filter(Boolean).join(' · ')}</div></div>`).join('');
-  return `<div class="job-ord"><div class="lt">${oLink(o.Order)} <span class="s">${esc(o.Date||'')}</span> ${who(o['Ordered by'])} ${pill(o.Source,o.Source==='Intellirent'?'green':(o.Source||'').startsWith('inferred')?'amber':'')} ${o['On rent']?pill(o['On rent']+' on rent','green'):''}</div>
+  return `<div class="job-ord"><div class="lt">${oLink(o.Order)} <span class="s">${esc(o.Date||'')}</span> ${who(o['Ordered by'])} ${o['On rent']?pill(o['On rent']+' on rent','green'):''}</div>
    <div class="lm">${esc(o['Ship to']||'')}</div>${items}</div>`}).join('')||'<p class="s">No orders</p>';
  const pw=j['Powerwave equipment']||[];
  const pwHtml=pw.length?`<h3>Powerwave-owned equipment on this job</h3>${pw.map(e=>`<div class="line"><div class="lt"><b>${esc(e.Unit||e.Serial||'')}</b> ${esc(e.Model||'')} ${pill(e.Status||'',e.Status==='MISSING'?'red':'green')}</div>
   <div class="lm">${[e.Serial&&('S/N '+esc(e.Serial)),e.Holder&&who(e.Holder)].filter(Boolean).join(' · ')}</div></div>`).join('')}`:'';
  const html=`${kv(hdr)}
-  <p class="s">No dollar amounts on this tab. Job links from Intellirent / order copy / ship-to / Desktop job folder.</p>
+  <p class="s">No dollar amounts on this tab.</p>
   <h3>Orders (${orders.length})</h3>${ordHtml}${pwHtml}`;
  openPanel(name==='Unassigned'?'Unassigned orders':('Job · '+name),html,'job='+encodeURIComponent(name));
 }
@@ -277,7 +276,7 @@ const V={
   top.innerHTML=[['jobs',c.jobs||0],['active (on rent)',c.active_jobs||0],['rental orders',c.orders||0],['unassigned orders',c.unassigned_orders||0]]
    .map(([l,v])=>`<div class="kpi"><b>${v}</b><span>${l}</span></div>`).join('');
   app.append(top);
-  app.insertAdjacentHTML('beforeend',`<p class="s">${esc(JB.note||'Job assignments from Intellirent / order copy / ship-to / Desktop. No dollar amounts.')}</p>`);
+  app.insertAdjacentHTML('beforeend',`<p class="s">No dollar amounts. Unmatched rentals show under Unassigned.</p>`);
   const yr=state.jobsYear||'all';
   const years=[...new Set(all.flatMap(j=>j.Years||[]))].sort((a,b)=>b-a);
   const filt=document.createElement('div');filt.className='qf';
@@ -303,8 +302,7 @@ const V={
    _active:j.Active?'Active (on rent)':'Inactive',
    _range:(j.From&&j.To)?(j.From===j.To?j.From:j.From+' → '+j.To):(j.From||j.To||''),
    _who:j['Ordered by summary']||'',
-   _ship:j['Ship to summary']||'',
-   _src:(j.Sources||[]).join(', ')
+   _ship:j['Ship to summary']||''
   }));
   app.append(listView('jobs',rows,{title:'Jobs',what:'job, who, ship-to, model, order',sort:'On rent',dir:-1,
    open:r=>openJob(r),
@@ -317,8 +315,7 @@ const V={
     {k:'_range',label:'Dates'},
     {k:'_who',label:'Who ordered',html:r=>who(r._who)},
     {k:'_ship',label:'Ship to'},
-    {k:'On rent',label:'On rent',html:r=>r['On rent']?`<b>${r['On rent']}</b>`:'0'},
-    {k:'_src',label:'Source',html:r=>(r.Sources||[]).map(s=>pill(s,s==='Intellirent'?'green':(s||'').startsWith('inferred')?'amber':'')).join(' ')}
+    {k:'On rent',label:'On rent',html:r=>r['On rent']?`<b>${r['On rent']}</b>`:'0'}
    ],
    filters:[{k:'_active',label:'Status'}]
   }));
