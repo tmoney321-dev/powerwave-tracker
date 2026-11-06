@@ -264,9 +264,7 @@ const V={
    const models=(S.by_model||[]).map(pick).filter(r=>r.Lines||r.Rentals||r.Spend).sort((a,b)=>b.Spend-a.Spend);
    box.append(listView('spend_models',models,{title:'Spend by model',what:'model',sort:'Spend',dir:-1,
     cols:[{k:'Model',html:r=>`<b>${esc(r.Model)}</b>`},{k:'Rentals'},{k:'Rental days',label:'Days'},{k:'Spend',v:r=>r.Spend,html:r=>`<b>${usd2(r.Spend)}</b>`},
-     {k:'Avg monthly spend',label:'Avg / mo',v:r=>r['Avg monthly spend'],html:r=>usd2(r['Avg monthly spend'])},{k:'Peak units',label:'Peak'},
-     {k:'No invoice',label:'No $',html:r=>{const n=(r['No invoice']||0)+(r['Zero invoice']||0);return n?pill(String(n),'amber'):''}}],
-    filters:[{k:'flag',label:'Invoice',v:r=>((r['No invoice']||0)+(r['Zero invoice']||0))?'Has $0 / blank':'All priced'}]}));
+     {k:'Avg monthly spend',label:'Avg / mo',v:r=>r['Avg monthly spend'],html:r=>usd2(r['Avg monthly spend'])},{k:'Peak units',label:'Most out at once'}]}));
    const people=(S.by_person||[]).map(pick).filter(r=>r.Lines||r.Rentals||r.Spend).sort((a,b)=>b.Spend-a.Spend);
    box.append(listView('spend_people',people,{title:'Spend by person',what:'person',sort:'Spend',dir:-1,
     cols:[{k:'Key',label:'Person',html:r=>who(r.Key)},{k:'Rentals'},{k:'Rental days',label:'Days'},{k:'Spend',v:r=>r.Spend,html:r=>`<b>${usd2(r.Spend)}</b>`},{k:'Lines'}]}));
@@ -275,16 +273,11 @@ const V={
     cols:[{k:'Key',label:'Job / ship to'},{k:'Rentals'},{k:'Rental days',label:'Days'},{k:'Spend',v:r=>r.Spend,html:r=>`<b>${usd2(r.Spend)}</b>`},{k:'Lines'}]}));
    if(S.service){const sv=S.service;box.append(fold('Service / calibration (excluded from rental spend)',Object.assign(document.createElement('p'),{className:'s',
     innerHTML:`${sv.orders||0} service orders · ${sv.lines||0} lines · invoiced ${usd2(sv.spend||0)}. ${esc(sv.note||'')}`})))}
-   if(S.flagged_no_invoice&&S.flagged_no_invoice.length){
-    box.append(fold(`Flagged: no invoice value (${S.flagged_no_invoice.length} lines — $0 / blank, not guessed)`,
-     listView('spend_flagged',S.flagged_no_invoice,{what:'flagged lines',sort:'Order',dir:1,
-      cols:[{k:'Order',html:r=>oLink(r.Order)},{k:'Model'},{k:'Flag',html:r=>pill(r.Flag,r.Flag.startsWith('no')?'amber':'')},{k:'Days'},{k:'Placed by',html:r=>who(r['Placed by'])},{k:'Job / ship to'}],
-      filters:[{k:'Flag'},{k:'Placed by'}]}),false))}
    const cc=S.cross_check||{};
    box.append(fold('Source & cross-check',Object.assign(document.createElement('p'),{className:'s',innerHTML:
     `Source: Intellirent rental history (OR/OE only). Built ${esc(S.built||'')}. Known spend <b>${usd2(cc.history_known_spend)}</b> across <b>${cc.history_orders}</b> orders.`+
     (cc.explanation?`<br>${esc(cc.explanation)}`:'')+
-    `<br>Sales (OS) and service/cal (SR/SRV) are excluded. Blank invoice lines are flagged; $0 lines are billed no-charge (laptops, lead sets) and count as $0 — never estimated.`})));
+    `<br>Sales (OS) and service/cal (SR/SRV) are excluded. Blank and $0 invoice lines add nothing to spend (never estimated).`})));
    Combo.scan();
   })();
  },
