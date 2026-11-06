@@ -268,16 +268,41 @@ const V={
    const people=(S.by_person||[]).map(pick).filter(r=>r.Lines||r.Rentals||r.Spend).sort((a,b)=>b.Spend-a.Spend);
    box.append(listView('spend_people',people,{title:'Spend by person',what:'person',sort:'Spend',dir:-1,
     cols:[{k:'Key',label:'Person',html:r=>who(r.Key)},{k:'Rentals'},{k:'Rental days',label:'Days'},{k:'Spend',v:r=>r.Spend,html:r=>`<b>${usd2(r.Spend)}</b>`},{k:'Lines'}]}));
-   const jobs=(S.by_job||[]).map(pick).filter(r=>r.Lines||r.Rentals||r.Spend).sort((a,b)=>b.Spend-a.Spend);
-   box.append(listView('spend_jobs',jobs,{title:'Spend by job / location',what:'job or ship-to',sort:'Spend',dir:-1,
-    cols:[{k:'Key',label:'Job / ship to'},{k:'Rentals'},{k:'Rental days',label:'Days'},{k:'Spend',v:r=>r.Spend,html:r=>`<b>${usd2(r.Spend)}</b>`},{k:'Lines'}]}));
+   // Jobs view (resolved job names; Unassigned last)
+   const pickJob=row=>{if(yr==='all'||!row.years)return row;const y=row.years[yr];if(!y)return {...row,Rentals:0,'Rental days':0,Spend:0,'Items rented':0,'Ordered by summary':'',Lines:0};
+    return {...row,Rentals:y.Rentals,'Rental days':y['Rental days'],Spend:y.Spend,'Items rented':y['Items rented']||0,'Ordered by summary':y['Ordered by summary']||'',Lines:y.Lines}};
+   const jobs=(S.jobs||[]).map(pickJob).filter(r=>r.Lines||r.Rentals||r.Spend);
+   const cov=S.job_coverage||{};
+   const covEl=document.createElement('p');covEl.className='s';
+   covEl.innerHTML=`Job assignment: <b>${usd2(cov.assigned_spend)}</b> of <b>${usd2(cov.total_spend)}</b> (`+
+    `${cov.assigned_pct||0}%) linked to a job`+
+    (cov.inferred_spend!=null?` · <b>${usd2(cov.inferred_spend)}</b> of that was inferred (order copy / ship-to / Desktop)`:'')+
+    `. Unmatched stay <b>Unassigned</b> — never guessed.`+
+    (cov.job_meta&&cov.job_meta.desktop_status==='offline'?' <span class="pill amber">Desktop offline</span>':'');
+   box.append(covEl);
+   box.append(listView('spend_jobs',jobs,{title:'Spend by job',what:'job',sort:'Spend',dir:-1,
+    cols:[{k:'Job',html:r=>r.Job==='Unassigned'?`<span class="pill amber">Unassigned</span>`:`<b>${esc(r.Job)}</b>`},
+     {k:'Rentals'},{k:'Rental days',label:'Days'},{k:'Spend',v:r=>r.Spend,html:r=>`<b>${usd2(r.Spend)}</b>`},
+     {k:'Items rented',label:'Items'},{k:'Ordered by summary',label:'Who ordered'}],
+    filters:[{k:'Job'}]}));
+   // Order-level table with job filter
+   let orders=(S.orders||[]).slice();
+   if(yr!=='all')orders=orders.filter(o=>String(o.Year)===String(yr));
+   box.append(listView('spend_orders',orders,{title:'Orders (who + job)',what:'order',sort:'Date',dir:-1,
+    open:r=>typeof openOrder==='function'?openOrder(r.Order):null,
+    cols:[{k:'Order',html:r=>oLink(r.Order)},{k:'Date'},{k:'Ordered by',html:r=>who(r['Ordered by'])},
+     {k:'Job',html:r=>r.Job==='Unassigned'?`<span class="pill amber">Unassigned</span>`:esc(r.Job)},
+     {k:'Source',html:r=>pill(r.Source,r.Source==='Intellirent'?'green':(r.Source||'').startsWith('inferred')?'amber':'')},
+     {k:'Ship to'},{k:'Items'},{k:'Spend',v:r=>r.Spend,html:r=>`<b>${usd2(r.Spend)}</b>`}],
+    filters:[{k:'Job'},{k:'Ordered by'},{k:'Source'}]}));
    if(S.service){const sv=S.service;box.append(fold('Service / calibration (excluded from rental spend)',Object.assign(document.createElement('p'),{className:'s',
     innerHTML:`${sv.orders||0} service orders · ${sv.lines||0} lines · invoiced ${usd2(sv.spend||0)}. ${esc(sv.note||'')}`})))}
    const cc=S.cross_check||{};
    box.append(fold('Source & cross-check',Object.assign(document.createElement('p'),{className:'s',innerHTML:
     `Source: Intellirent rental history (OR/OE only). Built ${esc(S.built||'')}. Known spend <b>${usd2(cc.history_known_spend)}</b> across <b>${cc.history_orders}</b> orders.`+
     (cc.explanation?`<br>${esc(cc.explanation)}`:'')+
-    `<br>Sales (OS) and service/cal (SR/SRV) are excluded. Blank and $0 invoice lines add nothing to spend (never estimated).`})));
+    `<br>Sales (OS) and service/cal (SR/SRV) are excluded. Blank and $0 invoice lines add nothing to spend (never estimated).`+
+    `<br>Jobs: Intellirent job field first; else ORDER COPIES Job # / Dropbox JOBS folder order PDFs; else ship-to only when that address already maps uniquely (≥2 orders); Desktop JOB FOLDERS when the PC is online. Otherwise Unassigned.`})));
    Combo.scan();
   })();
  },
