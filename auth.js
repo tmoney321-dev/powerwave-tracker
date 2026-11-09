@@ -33,8 +33,8 @@ const Auth=(()=>{
  async function admin(action,body={}){const {data,error}=await sb.functions.invoke('admin-users',{body:{action,...body}});
   if(error){let m=error.message;try{m=(await error.context.json()).error||m}catch(e){}throw new Error(m)}if(data&&data.error)throw new Error(data.error);return data}
  async function changePw(p){if(p.length<10)throw new Error('Password must be 10+ characters');const {error}=await sb.auth.updateUser({password:p});if(error)throw error}
- /* Short-lived signed URL for a PDF in the PRIVATE 'order-pdfs' bucket (storage RLS: admin/user only). */
- async function pdfUrl(name){const {data,error}=await sb.storage.from('order-pdfs').createSignedUrl(name,600);if(error)throw error;return data.signedUrl}
+ /* Short-lived signed URL for a PDF in the PRIVATE 'order-pdfs' bucket (storage RLS: admin SELECT only — PDFs contain prices). */
+ async function pdfUrl(name){if(role!=='admin')throw new Error('Order PDFs are admin-only');const {data,error}=await sb.storage.from('order-pdfs').createSignedUrl(name,600);if(error)throw error;return data.signedUrl}
  /* Person colors (table person_colors: authenticated read, admin write) */
  async function colors(){if(!sb)return [];const {data,error}=await sb.from('person_colors').select('name,color,aliases').order('name');if(error)throw error;return data||[]}
  async function saveColor(row){const {error}=await sb.from('person_colors').upsert({...row,updated_at:new Date().toISOString()});if(error)throw error}

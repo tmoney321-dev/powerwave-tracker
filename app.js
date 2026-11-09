@@ -58,7 +58,8 @@ function prep(){R=D.rentals.map((r,i)=>({...r,_i:i,_c:rentalCalc(r)}));OI={};
   x.date=o['Order date']||o['Ship date']||L.map(r=>r['Out date']).filter(Boolean).sort()[0]||'';
   x.actual=L.filter(r=>!r._c.est&&r._c.spent!=null).reduce((a,r)=>a+r._c.spent,0);x.estimate=L.filter(r=>r._c.est&&r._c.spent!=null).reduce((a,r)=>a+r._c.spent,0);
   x.total=L.some(r=>r._c.spent!=null)?x.actual+x.estimate:(o['Invoice total']??o['Sale/misc total']??null);
-  x.pdfs=[...new Set([...(o['PDF files']||[]),...((PDFX&&PDFX[x.no])||[])])];
+  // Live bucket listing is source of truth when available (uploaded.json can be stale).
+  x.pdfs=PDFX?[...((PDFX[x.no])||[])]:[...(o['PDF files']||[])];
   x.status=L.some(isOn)?'On rent':o.Status||(L.length&&L.every(r=>r.Status==='RETURNED')?'Returned':o.Board||'');})}
 
 /* ---------- simple list: search + <=3 filters (+ More filters), table on desktop, cards on phones ---------- */
@@ -116,29 +117,61 @@ document.addEventListener('keydown',e=>{if(e.key==='Escape')closePanel()});
 document.addEventListener('click',e=>{const a=e.target.closest('a.ord');if(a){e.preventDefault();e.stopPropagation();openOrder(a.dataset.o)}});
 
 function openOrder(no){no=String(no||'').toUpperCase();const x=OI[no];if(!x){toast('No data for '+no);return}
- const o=x.o||{},L=x.lines;
+ const o=x.o||{},L=x.lines,adm=!!Auth.isAdmin;
  const hdr={'Order':no,'Type':x.type,'Status':x.status,'Order date':o['Order date']||x.date,'Ship date':o['Ship date']||L.map(r=>r['Out date']).filter(Boolean).sort()[0],
   'Returned':L.some(isOn)?(L.some(r=>!isOn(r)&&r['Return/close date'])?'partly - '+L.filter(isOn).length+' item(s) still on rent':''):L.map(r=>r['Return/close date']).filter(Boolean).sort().slice(-1)[0],'Billed through':L.map(r=>r['Billed through']).filter(Boolean).sort().slice(-1)[0],
   'Placed by':x.who,'PO':L.map(r=>r.PO).find(v=>!blank(v)),'Job':L.map(r=>r.Job).find(v=>!blank(v)),'Ship to':L.map(r=>r['Ship to']).find(v=>!blank(v))||o['Ship to']||L.map(r=>r['Where (ship to / job)']).find(v=>!blank(v)),
   'Intellirent facility':o['Intellirent facility']||L.map(r=>r['Intellirent facility']).find(v=>!blank(v)),'Board':o.Board,'Assets':o.Assets,'Note':o.Note};
  const lines=L.map(r=>{const c=r._c;const certs=(D.equipment||[]).filter(e=>e.Serial&&(e.Serial===r.Serial)).flatMap(e=>e.Certs||[]);
+  const money=adm?`<div class="lm">${[r['Net daily']!=null&&usd2(r['Net daily'])+'/day',r['Net monthly']!=null&&usd2(r['Net monthly'])+'/mo',r['List daily']&&r['Net daily']==null&&'list '+usd2(r['List daily'])+'/day'].filter(Boolean).join(' · ')}</div>
+  <div class="lm">${c.spent!=null?`<b>${usd2(c.spent)}</b> ${c.est?pill('estimate','amber'):pill('actual invoiced','green')}`:'<span class="unk">price unknown</span>'}${r['History scope']==='Carried over'?' <span class="s">carried over, may be partial</span>':''}</div>`:'';
   return `<div class="line ${isOn(r)?'r-on':''}"><div class="lt"><b>${esc(r.Item)}</b> ${stPill(r)}</div>
   <div class="lm">${[r.Barcode&&'Barcode '+esc(r.Barcode),r.Serial&&'S/N '+esc(r.Serial),c.days!=null&&c.days+' days',r['Out date']&&'out '+fD(r['Out date']),r['Return/close date']&&'back '+fD(r['Return/close date']),r['Billed through']&&'billed thru '+fD(r['Billed through'])].filter(Boolean).join(' · ')}</div>
-  <div class="lm">${[r['Net daily']!=null&&usd2(r['Net daily'])+'/day',r['Net monthly']!=null&&usd2(r['Net monthly'])+'/mo',r['List daily']&&r['Net daily']==null&&'list '+usd2(r['List daily'])+'/day'].filter(Boolean).join(' · ')}</div>
-  <div class="lm">${c.spent!=null?`<b>${usd2(c.spent)}</b> ${c.est?pill('estimate','amber'):pill('actual invoiced','green')}`:'<span class="unk">price unknown</span>'}${r['History scope']==='Carried over'?' <span class="s">carried over, may be partial</span>':''}</div>
+  ${money}
   ${r['Cal exp']||certs.length?`<div class="lm">Cal cert: ${r['Cal exp']?'expires '+fD(r['Cal exp']):''} ${certs.map(p=>`<span class="path">${esc(p)}</span>`).join('')}</div>`:''}</div>`}).join('');
  const quotes=(D.quotes||[]).filter(q=>(q.Source||'').includes(no)||q.Quote===no);
  const pdfs=x.pdfs||[];
+ const moneyBlock=adm?`<div class="tots"><div><b>${usd2(x.actual)}</b><span>actual invoiced</span></div><div><b>${usd2(x.estimate)}</b><span>estimated</span></div><div><b>${L.length}</b><span>line(s)</span></div></div>`:`<div class="tots"><div><b>${L.length}</b><span>line(s)</span></div></div>`;
+ const quoteBlock=adm&&quotes.length?`<h3>Quote lines</h3>${quotes.map(q=>`<div class="line"><b>${esc(q.Item)}</b> ${esc(q.Description||'')}<div class="lm">${esc(q.Quote)} · qty ${esc(q.Qty)} · ${esc(q['Line total']||q['Unit price'])}</div></div>`).join('')}`:'';
+ // Order PDFs contain prices — admin only. Bucket listing (PDFX) decides "on file".
+ const pdfSection=adm?`<h3>Original order PDF</h3><div class="pdfs">${
+   !Auth.live||!Auth.pdfUrl?'<p class="s">PDF not available offline — open the live site while signed in as admin.</p>':
+   !pdfs.length?'<p class="s">No PDF on file for this order.</p>':
+   pdfs.map(n=>`<div class="pdf" data-n="${esc(n)}"><p class="s">Loading ${esc(n)}…</p></div>`).join('')
+ }</div>`:'';
  const html=`${kv(hdr)}
-  <div class="tots"><div><b>${usd2(x.actual)}</b><span>actual invoiced</span></div><div><b>${usd2(x.estimate)}</b><span>estimated</span></div><div><b>${L.length}</b><span>line(s)</span></div></div>
+  ${moneyBlock}
   <h3>Line items</h3>${lines||(o.Items?`<p>${esc(o.Items)}</p>`:'<p class="s">No line items on file.</p>')}
   ${o['Email lines']?`<h3>Order email lines</h3><p class="s">${esc(o['Email lines'])}</p>`:''}
-  ${quotes.length?`<h3>Quote lines</h3>${quotes.map(q=>`<div class="line"><b>${esc(q.Item)}</b> ${esc(q.Description||'')}<div class="lm">${esc(q.Quote)} · qty ${esc(q.Qty)} · ${esc(q['Line total']||q['Unit price'])}</div></div>`).join('')}`:''}
-  <h3>Original order PDF</h3><div class="pdfs">${pdfs.length?(Auth.live&&Auth.pdfUrl?pdfs.map(n=>`<div class="pdf" data-n="${esc(n)}"><p class="s">Loading ${esc(n)}…</p></div>`).join(''):'<p class="s">PDF not available offline - open the live site.</p>'):'<p class="s">No PDF on file for this order.</p>'}</div>`;
+  ${quoteBlock}
+  ${pdfSection}`;
  const p=openPanel('Order '+no,html,'order='+no);
- p.querySelectorAll('.pdf').forEach(async el=>{try{const u=await Auth.pdfUrl(el.dataset.n);
-  el.innerHTML=`<div class="row"><a class="btn" href="${esc(u)}" target="_blank" rel="noopener">Open PDF</a><span class="s">${esc(el.dataset.n)} · link expires in 10 min</span></div><iframe src="${esc(u)}" title="${esc(el.dataset.n)}" loading="lazy"></iframe>`}
-  catch(e){el.innerHTML=`<p class="s">Could not load PDF: ${esc(e.message)}</p>`}})}
+ if(adm) p.querySelectorAll('.pdf').forEach(el=>renderOrderPdf(el));
+}
+const isIOS=/iPad|iPhone|iPod/.test(navigator.userAgent)||(navigator.platform==='MacIntel'&&navigator.maxTouchPoints>1);
+async function renderOrderPdf(el){
+ const name=el.dataset.n;
+ try{
+  const u=await Auth.pdfUrl(name);
+  // iOS Safari often cannot render PDFs in iframes — open signed URL in a new tab.
+  if(isIOS){
+   el.innerHTML=`<div class="pdf-actions"><button type="button" class="btn pdf-open">View PDF</button>
+    <a class="btn sec" href="${esc(u)}" target="_blank" rel="noopener">Open in new tab</a>
+    <span class="s">${esc(name)} · link expires in 10 min</span></div>
+    <p class="s">On iPhone, PDFs open in a new tab (Safari can’t show them inside this panel).</p>`;
+   el.querySelector('.pdf-open').onclick=()=>{const w=window.open(u,'_blank','noopener');if(!w) location.href=u};
+  }else{
+   el.innerHTML=`<div class="pdf-actions"><button type="button" class="btn pdf-open">View PDF</button>
+    <a class="btn sec" href="${esc(u)}" target="_blank" rel="noopener">Open in new tab</a>
+    <span class="s">${esc(name)} · link expires in 10 min</span></div>
+    <div class="pdf-frame"><iframe src="${esc(u)}#toolbar=1" title="${esc(name)}" loading="lazy"></iframe></div>`;
+   el.querySelector('.pdf-open').onclick=()=>{const fr=el.querySelector('.pdf-frame');if(fr) fr.scrollIntoView({behavior:'smooth',block:'nearest'}); else window.open(u,'_blank','noopener')};
+  }
+ }catch(e){
+  const msg=String(e.message||e);
+  el.innerHTML=`<p class="s">${/not found|404|Object not found/i.test(msg)?'No PDF on file for this order.':('Could not load PDF: '+esc(msg))}</p>`;
+ }
+}
 function openRental(r){const c=r._c;openPanel(r.Item,`<p>${stPill(r)} ${oLink(r.Order)}</p>
  <div class="tots"><div><b>${c.spent!=null?usd2(c.spent):'?'}</b><span>${c.spent==null?'price unknown':c.est?'estimate':'actual invoiced'}</span></div><div><b>${c.days??''}</b><span>days</span></div></div>
  ${kv({...r,'Days out':c.days},['Item','Status','Order','Who (ordered by)','Where (ship to / job)'])}<p class="s">${esc(c.basis||'')}</p>`,'rental='+r._i)}
