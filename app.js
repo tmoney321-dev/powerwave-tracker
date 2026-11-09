@@ -11,7 +11,7 @@ const usd2=n=>n==null||isNaN(n)?'':'$'+n.toLocaleString('en-US',{minimumFraction
 const fD=s=>{if(blank(s))return '';const d=pd(String(s));return d&&/^\d{4}-\d\d-\d\d$|^\d{1,2}\/\d{1,2}\/\d{4}$/.test(String(s).trim())?d.toLocaleDateString('en-US',{month:'short',day:'numeric',year:'numeric'}):String(s)};
 const TAGC={JAN:'jan',MAY:'may',SEP:'sep'};
 const tagHTML=t=>t?`<span class="ctag ${TAGC[t]||''}">${t==='JAN'?'JAN · red':t==='MAY'?'MAY · blue':'SEP · green'}</span>`:'';
-const ORD=/\b(O[RSE]\d{6}|SR\d{6}|RS\d{6})\b/g;
+const ORD=/\b(O[RSE]\d{6}|SRV\d{5}|RSR\d{5}|SR\d{6}|RS\d{6})\b/g;
 const oLink=no=>no?`<a href="#order=${esc(no)}" class="ord" data-o="${esc(no)}">${esc(no)}</a>`:'';
 const linkOrders=t=>esc(t).replace(ORD,m=>oLink(m));
 const typ=no=>({OR:'Rental',OE:'Exchange',OS:'Sale',SR:'Service',RS:'Service (RSR)'})[String(no).slice(0,2)]||'';
@@ -484,10 +484,10 @@ const A={
   box.innerHTML=`<div class="kpis"><div class="kpi"><b>${fmtT(D.built)||'?'}</b><span>last snapshot / refresh</span></div><div class="kpi ${D.gaps&&D.gaps.length?'warnk':''}"><b>${(D.gaps||[]).length}</b><span>data gaps</span></div></div>
    <h3>Row counts</h3><div class="tw"><table><thead><tr><th>Dataset</th><th>Rows</th></tr></thead><tbody>${ds.map(([n,a])=>`<tr><td>${n}</td><td>${(a||[]).length.toLocaleString('en-US')}</td></tr>`).join('')}</tbody></table></div>`;
   box.append(fold('Sources & data gaps',sourcesEl(),true))},
- async pdfs(box){const O=Object.values(OI).filter(x=>/^O[RSE]/.test(x.no));const w=O.filter(x=>x.pdfs.length),wo=O.filter(x=>!x.pdfs.length);
+ async pdfs(box){const O=Object.values(OI).filter(x=>/^(?:O[RSE]|SRV?|RSR?)/.test(x.no));const w=O.filter(x=>x.pdfs.length),wo=O.filter(x=>!x.pdfs.length);
   const files=PDFX?Object.values(PDFX).reduce((a,v)=>a+v.length,0):null;
   box.innerHTML=`<div class="kpis"><div class="kpi"><b>${w.length}</b><span>orders with a PDF</span></div><div class="kpi warnk"><b>${wo.length}</b><span>orders without a PDF</span></div><div class="kpi"><b>${files??'—'}</b><span>files in order-pdfs bucket${files==null?' (live only)':''}</span></div></div>
-   <h3>Upload order PDFs</h3><p class="s">Name files <b>OR######.pdf</b> (extra copies <b>OR######_2.pdf</b>; OE/OS orders too). They go to the private <b>order-pdfs</b> bucket and show on the order right away - no rebuild.</p>
+   <h3>Upload order PDFs</h3><p class="s">Name files <b>OR######.pdf</b> (extra copies <b>OR######_2.pdf</b>; OE/OS/SR/SRV/RSR too). They go to the private <b>order-pdfs</b> bucket and show on the order right away - no rebuild.</p>
    <div class="bar"><input type="file" id="pf" accept="application/pdf,.pdf" multiple><label class="fl"><span>If exists</span><select id="pov" data-plain><option value="">Skip</option><option value="1">Overwrite</option></select></label><button id="pgo">Upload</button></div><div id="plog"></div>
    <h3>Orders without a PDF</h3>`;
   box.append(listView('nopdf',wo,{what:'order #',open:x=>openOrder(x.no),sort:'Date',dir:-1,cols:[{k:'no',label:'Order',html:x=>oLink(x.no)},{k:'date',label:'Date',v:x=>x.date},{k:'who',label:'Who',html:x=>who(x.who)},{k:'status',label:'Status'}],filters:[{k:'type',label:'Type'},{k:'year',label:'Year',v:x=>String(x.date).slice(0,4)}]}));
@@ -495,12 +495,12 @@ const A={
   box.querySelector('#pgo').onclick=async()=>{const fs=[...box.querySelector('#pf').files];const log=box.querySelector('#plog');if(!fs.length)return toast('Choose PDF file(s)');
    const ov=!!box.querySelector('#pov').value;let ok=0;log.innerHTML='';
    for(const f of fs){const n=f.name.trim().toUpperCase().replace(/\.PDF$/,'.pdf');const line=t=>log.insertAdjacentHTML('beforeend',`<p class="s">${esc(t)}</p>`);
-    if(!/^O[RSE]\d{6}(_\d+)?\.pdf$/.test(n)){line(`✗ ${f.name}: name must be OR######.pdf`);continue}
+    if(!/^(?:O[RSE]\d{6}|SRV\d{5}|SR\d{6}|RSR\d{5}|RS\d{6})(_\d+)?\.pdf$/.test(n)){line(`✗ ${f.name}: name must be OR######.pdf (or OE/OS/SR/SRV/RSR)`);continue}
     if(f.size>25e6){line(`✗ ${n}: larger than 25 MB`);continue}
     try{await Auth.pdfUpload(n,f,ov);ok++;line(`✓ ${n} uploaded`)}catch(e){line(`✗ ${n}: ${/exists|Duplicate/i.test(e.message)?'already exists (choose Overwrite)':e.message}`)}}
    if(ok){await loadPdfIndex();prep();toast(ok+' PDF(s) uploaded');const keep=log.innerHTML;render();const l2=document.getElementById('plog');if(l2)l2.innerHTML=keep}}}
 };
-async function loadPdfIndex(){if(!Auth.live)return;try{const L=await Auth.pdfList();PDFX={};L.forEach(f=>{const m=/^(O[RSE]\d{6})/.exec(f.name);if(m)(PDFX[m[1]]=PDFX[m[1]]||[]).push(f.name)})}catch(e){PDFX=null}}
+async function loadPdfIndex(){if(!Auth.live)return;try{const L=await Auth.pdfList();PDFX={};L.forEach(f=>{const m=/^(O[RSE]\d{6}|SRV\d{5}|RSR\d{5}|SR\d{6}|RS\d{6})/.exec(f.name);if(m)(PDFX[m[1]]=PDFX[m[1]]||[]).push(f.name)})}catch(e){PDFX=null}}
 function toast(t){const d=document.createElement('div');d.className='toast';d.textContent=t;document.body.append(d);setTimeout(()=>d.remove(),2500)}
 function sourcesEl(){const d=document.createElement('div');
  d.innerHTML=`<h3>Sources</h3>${(D.sources||[]).map(s=>`<div class="line"><b>${esc(s.Source)}</b><div class="lm">${esc(fmtT(s.dropbox_modified||s.file_modified||s.fetched||''))}${s.present===false?' · not present':''}</div></div>`).join('')}
