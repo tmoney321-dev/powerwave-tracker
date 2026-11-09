@@ -122,13 +122,16 @@ function openOrder(no){no=String(no||'').toUpperCase();const x=OI[no];if(!x){toa
   'Returned':L.some(isOn)?(L.some(r=>!isOn(r)&&r['Return/close date'])?'partly - '+L.filter(isOn).length+' item(s) still on rent':''):L.map(r=>r['Return/close date']).filter(Boolean).sort().slice(-1)[0],'Billed through':L.map(r=>r['Billed through']).filter(Boolean).sort().slice(-1)[0],
   'Placed by':x.who,'PO':L.map(r=>r.PO).find(v=>!blank(v)),'Job':L.map(r=>r.Job).find(v=>!blank(v)),'Ship to':L.map(r=>r['Ship to']).find(v=>!blank(v))||o['Ship to']||L.map(r=>r['Where (ship to / job)']).find(v=>!blank(v)),
   'Intellirent facility':o['Intellirent facility']||L.map(r=>r['Intellirent facility']).find(v=>!blank(v)),'Board':o.Board,'Assets':o.Assets,'Note':o.Note};
- const lines=L.map(r=>{const c=r._c;const certs=(D.equipment||[]).filter(e=>e.Serial&&(e.Serial===r.Serial)).flatMap(e=>e.Certs||[]);
+ const lines=L.map(r=>{const c=r._c;const certs=[...(r.Certs||[]),...((D.equipment||[]).filter(e=>e.Serial&&(e.Serial===r.Serial)).flatMap(e=>e.Certs||[]))];
   const money=adm?`<div class="lm">${[r['Net daily']!=null&&usd2(r['Net daily'])+'/day',r['Net monthly']!=null&&usd2(r['Net monthly'])+'/mo',r['List daily']&&r['Net daily']==null&&'list '+usd2(r['List daily'])+'/day'].filter(Boolean).join(' · ')}</div>
   <div class="lm">${c.spent!=null?`<b>${usd2(c.spent)}</b> ${c.est?pill('estimate','amber'):pill('actual invoiced','green')}`:'<span class="unk">price unknown</span>'}${r['History scope']==='Carried over'?' <span class="s">carried over, may be partial</span>':''}</div>`:'';
+  const calBits=[r['Cal date']&&('cal '+fD(r['Cal date'])),r['Cal exp']&&('due '+fD(r['Cal exp']))].filter(Boolean).join(' · ');
+  const certBtn=(adm&&r['Cert PDF']&&Auth.live&&Auth.pdfUrl)?`<button type="button" class="btn sec cert-open" data-cert="${esc(r['Cert PDF'])}">Cal cert</button>`:'';
+  const certPaths=certs.length?certs.map(p=>`<span class="path">${esc(p)}</span>`).join(' '):'';
   return `<div class="line ${isOn(r)?'r-on':''}"><div class="lt"><b>${esc(r.Item)}</b> ${stPill(r)}</div>
   <div class="lm">${[r.Barcode&&'Barcode '+esc(r.Barcode),r.Serial&&'S/N '+esc(r.Serial),c.days!=null&&c.days+' days',r['Out date']&&'out '+fD(r['Out date']),r['Return/close date']&&'back '+fD(r['Return/close date']),r['Billed through']&&'billed thru '+fD(r['Billed through'])].filter(Boolean).join(' · ')}</div>
   ${money}
-  ${r['Cal exp']||certs.length?`<div class="lm">Cal cert: ${r['Cal exp']?'expires '+fD(r['Cal exp']):''} ${certs.map(p=>`<span class="path">${esc(p)}</span>`).join('')}</div>`:''}</div>`}).join('');
+  ${calBits||certBtn||certPaths?`<div class="lm cert-row">Cal cert: ${esc(calBits)||''} ${certBtn} ${certPaths}</div>`:''}</div>`}).join('');
  const quotes=(D.quotes||[]).filter(q=>(q.Source||'').includes(no)||q.Quote===no);
  const pdfs=x.pdfs||[];
  const moneyBlock=adm?`<div class="tots"><div><b>${usd2(x.actual)}</b><span>actual invoiced</span></div><div><b>${usd2(x.estimate)}</b><span>estimated</span></div><div><b>${L.length}</b><span>line(s)</span></div></div>`:`<div class="tots"><div><b>${L.length}</b><span>line(s)</span></div></div>`;
@@ -146,7 +149,15 @@ function openOrder(no){no=String(no||'').toUpperCase();const x=OI[no];if(!x){toa
   ${quoteBlock}
   ${pdfSection}`;
  const p=openPanel('Order '+no,html,'order='+no);
- if(adm) p.querySelectorAll('.pdf').forEach(el=>renderOrderPdf(el));
+ if(adm){
+  p.querySelectorAll('.pdf').forEach(el=>renderOrderPdf(el));
+  p.querySelectorAll('.cert-open').forEach(btn=>btn.onclick=async()=>{
+   try{
+    const u=await Auth.pdfUrl(btn.dataset.cert);
+    const w=window.open(u,'_blank','noopener'); if(!w) location.href=u;
+   }catch(e){toast('Cal cert: '+(e.message||e))}
+  });
+ }
 }
 const isIOS=/iPad|iPhone|iPod/.test(navigator.userAgent)||(navigator.platform==='MacIntel'&&navigator.maxTouchPoints>1);
 async function renderOrderPdf(el){
