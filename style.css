@@ -18,7 +18,7 @@ th.asc::after{content:' ▲'}th.desc::after{content:' ▼'}td{padding:7px 8px;bo
 .note{max-width:520px;white-space:pre-wrap;font-size:13px}.path{display:block;min-width:200px;font-family:ui-monospace,monospace;font-size:11px;color:#36506f;word-break:break-all}
 .pill{display:inline-block;border-radius:12px;padding:2px 8px;font-size:12px;font-weight:700;color:#fff;margin-left:2px}.pill.red{background:#c62828}.pill.green{background:#2e7d32}.pill.amber{background:#b26a00}
 .unk{color:#b26a00;font-weight:700}
-.due.over{color:#c62828;font-weight:700}.due.soon{color:#b26a00;font-weight:700}.due.ok{color:#2e7d32}
+.due.over{color:#c62828;font-weight:700}.due.soon{color:#b26a00;font-weight:700}.due.ok{color:#2e7d32}.due.nocal,.due.nodate{color:#555;font-weight:500}
 tr.r-on td:first-child,tr.r-miss td:first-child{box-shadow:inset 4px 0 #c62828}tr.r-ok td:first-child{box-shadow:inset 4px 0 #2e7d32}
 /* Cal tag colors: January red, May blue, September green */
 .ctag{display:inline-block;color:#fff!important;border-radius:6px;padding:1px 7px;font-size:12px;font-weight:700;color:#fff}.ctag.jan{background:#d32f2f}.ctag.may{background:#1565c0}.ctag.sep{background:#2e7d32}
@@ -84,7 +84,7 @@ dl.kv{display:grid;grid-template-columns:minmax(110px,34%) 1fr;gap:4px 12px;back
 @media (max-width:760px){.bar{display:grid;grid-template-columns:repeat(3,minmax(0,1fr))}.bar .q{grid-column:1/-1}.bar .mf,.bar .cnt{grid-column:span 3}}
 
 .left{display:inline-block;padding:1px 8px;border-radius:10px;font-weight:700;font-size:.85em;white-space:nowrap}
-.left.over{background:#fdecea;color:#c62828}.left.soon{background:#fff4e0;color:#b26a00}.left.ok{background:#e8f5e9;color:#2e7d32}.left.nodate{background:#eee;color:#888}
+.left.over{background:#fdecea;color:#c62828}.left.soon{background:#fff4e0;color:#b26a00}.left.ok{background:#e8f5e9;color:#2e7d32}.left.nodate,.left.nocal{background:#eee;color:#555}
 .qf{display:flex;gap:6px;margin:6px 0;flex-wrap:wrap}.qf button{border:1px solid #ccc;background:#fff;border-radius:16px;padding:4px 12px;cursor:pointer;color:#333}.qf button.on{background:#1f3a5f;color:#fff;border-color:#1f3a5f}
 
 .who{display:inline-block;padding:0 8px 0 6px;border-left:4px solid var(--pc);background:color-mix(in srgb,var(--pc) 12%,#fff);border-radius:3px;color:#222;white-space:nowrap}

@@ -125,7 +125,7 @@ function openOrder(no){no=String(no||'').toUpperCase();const x=OI[no];if(!x){toa
  const lines=L.map(r=>{const c=r._c;const certs=[...(r.Certs||[]),...((D.equipment||[]).filter(e=>e.Serial&&(e.Serial===r.Serial)).flatMap(e=>e.Certs||[]))];
   const money=adm?`<div class="lm">${[r['Net daily']!=null&&usd2(r['Net daily'])+'/day',r['Net monthly']!=null&&usd2(r['Net monthly'])+'/mo',r['List daily']&&r['Net daily']==null&&'list '+usd2(r['List daily'])+'/day'].filter(Boolean).join(' · ')}</div>
   <div class="lm">${c.spent!=null?`<b>${usd2(c.spent)}</b> ${c.est?pill('estimate','amber'):pill('actual invoiced','green')}`:'<span class="unk">price unknown</span>'}${r['History scope']==='Carried over'?' <span class="s">carried over, may be partial</span>':''}</div>`:'';
-  const calBits=[r['Cal date']&&('cal '+fD(r['Cal date'])),r['Cal exp']&&('due '+fD(r['Cal exp']))].filter(Boolean).join(' · ');
+  const calBits=[r['Cal date']&&('cal '+fD(r['Cal date'])),noCal(r)?(r['Cal status']||'No cal required'):(r['Cal exp']&&('due '+fD(r['Cal exp'])))].filter(Boolean).join(' · ');
   const certBtn=(adm&&r['Cert PDF']&&Auth.live&&Auth.pdfUrl)?`<button type="button" class="btn sec cert-open" data-cert="${esc(r['Cert PDF'])}">Cal cert</button>`:'';
   const certPaths=certs.length?certs.map(p=>`<span class="path">${esc(p)}</span>`).join(' '):'';
   return `<div class="line ${isOn(r)?'r-on':''}"><div class="lt"><b>${esc(r.Item)}</b> ${stPill(r)}</div>
@@ -232,11 +232,12 @@ function nav(){document.getElementById('tabs').innerHTML=TABS.filter(([k])=>(k!=
 function render(){nav();app.innerHTML='';(V[tab]||V.rentals)();Combo.scan();window.scrollTo(0,0)}
 const fmtT=t=>t?new Date(t).toLocaleString('en-US',{timeZone:'America/Chicago',month:'short',day:'numeric',year:'numeric',hour:'numeric',minute:'2-digit'})+' CT':'';
 const head=h=>{const d=document.createElement('div');d.className='hd';d.innerHTML=`<h1>${h}</h1><span class="s">Data as of ${fmtT(D.built)}</span>`;app.append(d)};
-const dueInfo=e=>{const d=pd(e['Due date']);if(!d)return {k:'nodate',t:'no due date',n:null};const n=days(TODAY(),d);
+const noCal=e=>!!(e&&(e._no_cal||e['Cal required']===false||/no cal required/i.test(e['Cal status']||'')));
+const dueInfo=e=>{if(noCal(e))return {k:'nocal',t:'No cal required',n:null};const d=pd(e&&e['Due date']);if(!d)return {k:'nodate',t:'no due date',n:null};const n=days(TODAY(),d);
  return n<0?{k:'over',t:`overdue ${-n}d`,n}:n<=30?{k:'soon',t:`due in ${n}d`,n}:{k:'ok',t:`${n}d left`,n}};
-const leftTxt=d=>d.n==null?'—':d.n<0?`Overdue ${-d.n} day${d.n===-1?'':'s'}`:d.n===0?'Due today':`${d.n} day${d.n===1?'':'s'}`;
+const leftTxt=d=>d.k==='nocal'?'No cal required':d.n==null?'—':d.n<0?`Overdue ${-d.n} day${d.n===-1?'':'s'}`:d.n===0?'Due today':`${d.n} day${d.n===1?'':'s'}`;
 const leftHTML=d=>`<span class="left ${d.k}">${leftTxt(d)}</span>`;
-const dueWin=d=>d.n==null?'No date':d.n<0?'Overdue':d.n<=30?'Due in 30 days':'Later';
+const dueWin=d=>d.k==='nocal'?'No cal required':d.n==null?'No date':d.n<0?'Overdue':d.n<=30?'Due in 30 days':'Later';
 const leftCol={k:'_left',label:'Days left',s:x=>x._d.n,v:x=>leftTxt(x._d),html:x=>leftHTML(x._d)};
 const quickDue=(key,E)=>{const st=state[key]||(state[key]={q:'',f:{},sort:'Days left',dir:1,n:100,more:false});const cur=st.f['Due window']||'';
  const b=document.createElement('div');b.className='qf';b.innerHTML=['','Overdue','Due in 30 days'].map(v=>`<button class="${cur===v?'on':''}" data-v="${v}">${v||'All'} <small>${v?E.filter(e=>dueWin(e._d)===v||(v==='Due in 30 days'&&e._d.k==='soon')).length:E.length}</small></button>`).join('');
@@ -267,7 +268,7 @@ const V={
  equipment(){head('Equipment');
   const E=D.equipment.map(e=>({...e,_d:dueInfo(e)}));const c=f=>E.filter(f).length;
   kpis([[E.length,'units'],[c(e=>e.Status==='MISSING'),'missing (not confirmed)',1],[c(e=>e._d.k==='over'),'cal overdue',1],[c(e=>e._d.k==='soon'),'due within 30 days']]);
-  const dl=e=>({over:'Overdue',soon:'Due soon',ok:'OK',nodate:'No date'})[e._d.k];
+  const dl=e=>({over:'Overdue',soon:'Due soon',ok:'OK',nodate:'No date',nocal:'No cal required'})[e._d.k];
   app.append(quickDue('equipment',E));app.append(legend(E.map(e=>e.Holder)));
   app.append(listView('equipment',E,{what:'unit, model, serial, holder',open:openUnit,rowClass:e=>(e.Status==='MISSING'?'r-miss ':'')+'tag-'+(TAGC[tagOf(e).t]||''),
    cols:[{k:'Unit',label:'Asset',html:e=>`<b>${esc(e.Unit)}</b>`},{k:'Model'},{k:'Holder',html:e=>who(e.Holder)},{k:'tag',label:'Tag color',s:e=>tagOf(e).t,v:e=>TAGN[tagOf(e).t]||'None',html:tagDot},{k:'Due date',label:'Cal due',s:e=>e['Due date'],v:e=>e['Due date'],html:e=>e['Due date']?`<span class="due ${e._d.k}">${fD(e['Due date'])}</span>`:''},leftCol,
