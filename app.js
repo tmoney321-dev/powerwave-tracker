@@ -225,11 +225,19 @@ function fromHash(){const h=decodeURIComponent(location.hash.slice(1));let m;
  return false}
 
 /* ---------- tabs ---------- */
-const TABS=[['rentals','Live Rentals'],['equipment','Equipment'],['tech','Tech Assignments'],['certsneeded','Certs Needed'],
+const TABS=[['myeq','My Equipment'],['rentals','Live Rentals'],['equipment','Equipment'],['tech','Tech Assignments'],['certsneeded','Certs Needed'],
  ['orders','Intellirent Orders'],['orderlist','Order List'],['jobs','Jobs'],['search','Global Search'],['spend','Rental Spend'],['admin','Admin'],['account','Account']];
-let tab=(location.hash||'#rentals').slice(1);if(/=/.test(tab))tab='rentals';if(tab==='users')tab='admin';
-function nav(){document.getElementById('tabs').innerHTML=TABS.filter(([k])=>(k!=='admin'&&k!=='spend')||Auth.isAdmin).filter(([k])=>k!=='account'||Auth.live)
- .map(([k,l])=>`<button role="tab" class="${k===tab?'on':''}" data-t="${k}">${l}</button>`).join('');
+const techOnly=()=>!!(Auth.live&&Auth.role==='user'&&!Auth.isAdmin);
+const myTechName=()=>{const em=String(Auth.email||'').trim().toLowerCase();return (D&&D.tech_emails&&D.tech_emails[em])||null};
+let tab=(location.hash||'#myeq').slice(1);if(/=/.test(tab))tab='myeq';if(tab==='users')tab='admin';if(tab==='rentals'&&!(location.hash||'').slice(1))tab='myeq';
+function nav(){const tabs=TABS.filter(([k])=>{
+  if(k==='account')return !!Auth.live;
+  if(techOnly())return k==='myeq';
+  if(k==='admin'||k==='spend')return !!Auth.isAdmin;
+  return true});
+ if(techOnly()&&tab!=='myeq'&&tab!=='account')tab='myeq';
+ document.body.classList.toggle('tech-only',techOnly());
+ document.getElementById('tabs').innerHTML=tabs.map(([k,l])=>`<button role="tab" class="${k===tab?'on':''}" data-t="${k}">${l}</button>`).join('');
  document.querySelectorAll('#tabs button').forEach(b=>b.onclick=()=>{tab=b.dataset.t;location.hash=tab;render()})}
 function render(){nav();app.innerHTML='';(V[tab]||V.rentals)();Combo.scan();window.scrollTo(0,0)}
 const fmtT=t=>t?new Date(t).toLocaleString('en-US',{timeZone:'America/Chicago',month:'short',day:'numeric',year:'numeric',hour:'numeric',minute:'2-digit'})+' CT':'';
@@ -266,6 +274,55 @@ const V={
    more:[{k:'Job'},{k:'Type'},{k:'Spend',v:r=>r._c.spent==null?'Price unknown':r._c.est?'Estimate':'Actual'},{k:'Intellirent facility',label:'IR facility'}]}));
   if(D.quotes&&D.quotes.length)app.append(fold('Quotes (not spend)',listView('quotes',D.quotes,{what:'quotes',open:q=>openRow('Quote '+q.Quote,q),cols:[{k:'Quote'},{k:'Item'},{k:'Line total'},{k:'Received',v:q=>fD(String(q.Received).slice(0,10))}]})));
   app.append(fold('How on-rent spend is estimated',Object.assign(document.createElement('p'),{className:'s',innerHTML:'Running totals for actual rental spend (by year, model, person, and job) live on the admin-only <b>Rental Spend</b> tab. Here, items still on rent without an invoiced amount are <b>estimates</b> from order rates (never invented). No rate on file = price unknown.'})));
+ },
+
+ myeq(){head('My Equipment');
+  const people=(D.people_equipment||[]).map(p=>({...p,units:(p.units||[]).map(e=>({...e,_d:dueInfo(e)}))}));
+  const mine=myTechName();
+  let visible;
+  if(techOnly()){
+    visible=people.filter(p=>p.name===mine&&!p.location);
+    if(!visible.length){
+      app.insertAdjacentHTML('beforeend', mine
+        ? `<p>No confirmed equipment is assigned to <b>${esc(mine)}</b> right now.</p>`
+        : `<p>Your account is not linked to a technician name. Ask an admin to check the email mapping.</p>`);
+      return;
+    }
+  }else{
+    visible=people;
+    if(!visible.length){app.insertAdjacentHTML('beforeend','<p>No confirmed equipment is assigned to anyone right now.</p>');return}
+    const st=state.myeq||(state.myeq={person:mine&&visible.some(p=>p.name===mine)?mine:visible[0].name});
+    if(!visible.some(p=>p.name===st.person))st.person=visible[0].name;
+    const sw=document.createElement('div');sw.className='me-people';
+    sw.innerHTML=visible.map(p=>`<button type="button" class="${p.name===st.person?'on':''}" data-p="${esc(p.name)}">${esc(p.name)} <small>${p.units.length}</small></button>`).join('');
+    sw.querySelectorAll('button').forEach(b=>b.onclick=()=>{state.myeq.person=b.dataset.p;render()});
+    app.append(sw);
+    visible=visible.filter(p=>p.name===st.person);
+  }
+  const p=visible[0];
+  const n=p.units.length, missing=p.units.filter(e=>!e['Cert PDF']).length;
+  kpis([[n,'confirmed unit'+(n===1?'':'s'),false],[missing,'cert not on file',!!missing]]);
+  const list=document.createElement('div');list.className='me-list';
+  list.innerHTML=p.units.map((e,i)=>{
+    const d=e._d, tag=tagHTML(tagOf(e).t)||tagDot(e);
+    const cert=e['Cert PDF']?`<div class="me-cert">Tap to open current cal cert</div>`:`<div class="me-cert missing">Cert not on file</div>`;
+    return `<button type="button" class="me-card" data-i="${i}">
+      <div class="me-top"><b>${esc(e.Unit)}</b> <span>${esc(e.Model||'')}</span></div>
+      <div class="me-meta"><span>S/N ${esc(e.Serial||'—')}</span>
+        <span>Cal ${e['Cal date']?esc(fD(e['Cal date'])):'—'}</span>
+        <span>Due ${noCal(e)?'—':(e['Due date']?`<span class="due ${d.k}">${esc(fD(e['Due date']))}</span>`:'—')}</span>
+        ${leftHTML(d)} ${tag}</div>${cert}</button>`;
+  }).join('');
+  list.querySelectorAll('.me-card').forEach(btn=>btn.onclick=async()=>{
+    const e=p.units[+btn.dataset.i];
+    if(!e['Cert PDF']){toast('Cert not on file');return}
+    if(!Auth.live||!Auth.certUrl){toast('Open the live site while signed in to view certs.');return}
+    try{
+      const u=await Auth.certUrl(e['Cert PDF']);
+      window.open(u,'_blank','noopener');
+    }catch(err){toast(err.message||'Could not open cert')}
+  });
+  app.append(list);
  },
  equipment(){head('Equipment');
   const E=D.equipment.map(e=>({...e,_d:dueInfo(e)}));const c=f=>E.filter(f).length;
@@ -530,11 +587,11 @@ function gsearch(q){const el=document.getElementById('gres');if(!el)return;const
   html+=`<h3>${esc(name)} <span class="s">(${hits.length})</span></h3>`+hits.slice(0,25).map((r,i)=>`<div class="hit" data-g="${id}" data-i="${i}">${linkOrders(lab(r))}</div>`).join('')+(hits.length>25?`<p class="s">+${hits.length-25} more - refine the search</p>`:'')}
  el.innerHTML=total?html:'<p>No matches.</p>';
  el.querySelectorAll('.hit').forEach(h=>h.onclick=e=>{if(e.target.closest('a.ord'))return;const [hits,open]=map[h.dataset.g];open(hits[+h.dataset.i])})}
-document.getElementById('gq').addEventListener('input',e=>{if(tab!=='search'){tab='search';render()}else gsearch(e.target.value);const g=document.getElementById('gs');if(g&&document.activeElement!==e.target)g.value=e.target.value});
-document.getElementById('gq').addEventListener('keydown',e=>{if(e.key==='Enter'){tab='search';render()}});
+document.getElementById('gq').addEventListener('input',e=>{if(techOnly())return;if(tab!=='search'){tab='search';render()}else gsearch(e.target.value);const g=document.getElementById('gs');if(g&&document.activeElement!==e.target)g.value=e.target.value});
+document.getElementById('gq').addEventListener('keydown',e=>{if(techOnly())return;if(e.key==='Enter'){tab='search';render()}});
 let rz;window.addEventListener('resize',()=>{clearTimeout(rz);const w=narrow();rz=setTimeout(()=>{if(w!==window._nw){window._nw=w;if(D)render()}},200)});
 
-(async()=>{D=await Auth.start();if(Auth.live){await Promise.all([Auth.colors().then(r=>{if(r.length)setPersonColors(r)}).catch(()=>{}),loadPdfIndex()])}prep();window._nw=narrow();document.getElementById('who').innerHTML=Auth.live?`<button class="sec sm" onclick="Auth.signOut()">Sign out</button>`:'';render();fromHash();
+(async()=>{D=await Auth.start();if(Auth.live){await Promise.all([Auth.colors().then(r=>{if(r.length)setPersonColors(r)}).catch(()=>{}),loadPdfIndex()])}prep();window._nw=narrow();document.getElementById('who').innerHTML=Auth.live?`<button class="sec sm" onclick="Auth.signOut()">Sign out</button>`:'';if(!(location.hash||'').slice(1)){tab='myeq';location.hash='myeq'}document.body.classList.toggle('tech-only',techOnly());render();fromHash();
  setInterval(()=>{if(tab==='rentals'&&document.getElementById('panel').hidden&&!document.activeElement.matches('input,select')){prep();render()}},6*3600e3)})();
 window.addEventListener('hashchange',()=>{if(!D)return;if(fromHash())return;closePanel();const t=location.hash.slice(1);if(t&&!/=/.test(t)&&t!==tab){tab=t;render()}});
 window.addEventListener('popstate',()=>{if(!D)return;if(!/^#(order|unit|rental|job)=/.test(location.hash)){const p=document.getElementById('panel');if(!p.hidden){p.hidden=true;p.innerHTML='';document.body.classList.remove('noscroll')}}else fromHash()});

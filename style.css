@@ -111,3 +111,17 @@ dl.kv{display:grid;grid-template-columns:minmax(110px,34%) 1fr;gap:4px 12px;back
 
 /* Order PDF viewer (admin-only; iOS opens in new tab) */
 .pdf-actions{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin:6px 0}.pdf-actions .btn{display:inline-block}.pdf-frame iframe,.pdf iframe{width:100%;height:min(70vh,640px);border:1px solid #d8dde4;border-radius:10px;background:#fff;margin-top:6px}
+
+/* ---- My Equipment ---- */
+.me-people{display:flex;flex-wrap:wrap;gap:8px;margin:0 0 14px}
+.me-people button{border:1px solid #c9d3de;background:#fff;color:#1b1f24;border-radius:20px;padding:6px 12px;font-weight:600}
+.me-people button.on{background:#1f3a5f;color:#fff;border-color:#1f3a5f}
+.me-list{display:flex;flex-direction:column;gap:10px}
+.me-card{background:#fff;border-radius:12px;padding:12px 14px;box-shadow:0 1px 3px #0002;cursor:pointer;text-align:left;border:0;width:100%}
+.me-card:focus{outline:2px solid #1f3a5f;outline-offset:2px}
+.me-card .me-top{display:flex;flex-wrap:wrap;gap:6px 12px;align-items:baseline}
+.me-card .me-top b{font-size:1.05em}
+.me-card .me-meta{margin-top:6px;color:#333c47;display:flex;flex-wrap:wrap;gap:6px 14px;align-items:center}
+.me-card .me-cert{margin-top:6px;font-size:13px;color:#5a6573}
+.me-card .me-cert.missing{font-style:italic}
+body.tech-only #gq{display:none}

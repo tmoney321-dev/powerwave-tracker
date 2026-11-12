@@ -57,6 +57,7 @@ const Auth=(()=>{
  async function changePw(p){if(p.length<10)throw new Error('Password must be 10+ characters');const {error}=await sb.auth.updateUser({password:p});if(error)throw error}
  /* Short-lived signed URL for a PDF in the PRIVATE 'order-pdfs' bucket (storage RLS: admin SELECT only — PDFs contain prices). */
  async function pdfUrl(name){if(role!=='admin')throw new Error('PDFs are admin-only');const {data,error}=await sb.storage.from('order-pdfs').createSignedUrl(name,600);if(error)throw error;return data.signedUrl}
+ async function certUrl(path){const {data,error}=await sb.functions.invoke('cert-url',{body:{path}});if(error){let m=error.message;try{m=(await error.context.json()).error||m}catch(e){}throw new Error(m)}if(data&&data.error)throw new Error(data.error);if(!data||!data.url)throw new Error('No cert URL');return data.url}
  /* Person colors (table person_colors: authenticated read, admin write) */
  async function colors(){if(!sb)return [];const {data,error}=await sb.from('person_colors').select('name,color,aliases').order('name');if(error)throw error;return data||[]}
  async function saveColor(row){const {error}=await sb.from('person_colors').upsert({...row,updated_at:new Date().toISOString()});if(error)throw error}
@@ -71,5 +72,5 @@ const Auth=(()=>{
   if(role!=='admin')return null;
   const {data,error}=await sb.from('admin_spend').select('data,built_at').eq('id','current').maybeSingle();
   if(error)throw error;return data?data.data:null}
- return {start,signOut,admin,changePw,pdfUrl,colors,saveColor,delColor,pdfList,pdfUpload,adminSpend,get live(){return live},get role(){return role},get email(){return email},get isAdmin(){return role==='admin'}};
+ return {start,signOut,admin,changePw,pdfUrl,certUrl,colors,saveColor,delColor,pdfList,pdfUpload,adminSpend,get live(){return live},get role(){return role},get email(){return email},get isAdmin(){return role==='admin'}};
 })();
