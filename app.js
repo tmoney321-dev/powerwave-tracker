@@ -233,19 +233,22 @@ function fromHash(){const h=decodeURIComponent(location.hash.slice(1));let m;
  return false}
 
 /* ---------- tabs ---------- */
-const TABS=[['myeq','My Equipment'],['rentals','Live Rentals'],['equipment','Equipment'],['tech','Tech Assignments'],['certsneeded','Certs Needed'],
+const TABS=[['myeq','My Equipment'],['duesoon','Due Soon'],['rentals','Live Rentals'],['equipment','Equipment'],['tech','Tech Assignments'],['certsneeded','Certs Needed'],
  ['orders','Intellirent Orders'],['orderlist','Order List'],['jobs','Jobs'],['search','Global Search'],['spend','Rental Spend'],['admin','Admin'],['account','Account']];
 const techOnly=()=>!!(Auth.live&&Auth.role==='user'&&!Auth.isAdmin);
 const myTechName=()=>{const em=String(Auth.email||'').trim().toLowerCase();return (D&&D.tech_emails&&D.tech_emails[em])||null};
 let tab=(location.hash||'#myeq').slice(1);if(/=/.test(tab))tab='myeq';if(tab==='users')tab='admin';if(tab==='rentals'&&!(location.hash||'').slice(1))tab='myeq';
 function nav(){const tabs=TABS.filter(([k])=>{
   if(k==='account')return !!Auth.live;
-  if(techOnly())return k==='myeq'||k==='jobs';
+  if(techOnly())return k==='myeq'||k==='duesoon'||k==='jobs';
   if(k==='admin'||k==='spend')return !!Auth.isAdmin;
   return true});
- if(techOnly()&&tab!=='myeq'&&tab!=='account'&&tab!=='jobs')tab='myeq';
+ if(techOnly()&&tab!=='myeq'&&tab!=='account'&&tab!=='jobs'&&tab!=='duesoon')tab='myeq';
  document.body.classList.toggle('tech-only',techOnly());
- document.getElementById('tabs').innerHTML=tabs.map(([k,l])=>`<button role="tab" class="${k===tab?'on':''}" data-t="${k}">${l}</button>`).join('');
+ document.getElementById('tabs').innerHTML=tabs.map(([k,l])=>{
+  const badge=(k==='duesoon')?dueSoonBadge():'';
+  return `<button role="tab" class="${k===tab?'on':''}" data-t="${k}">${l}${badge}</button>`;
+ }).join('');
  document.querySelectorAll('#tabs button').forEach(b=>b.onclick=()=>{tab=b.dataset.t;location.hash=tab;render()})}
 function render(){nav();app.innerHTML='';(V[tab]||V.rentals)();Combo.scan();window.scrollTo(0,0)}
 const fmtT=t=>t?new Date(t).toLocaleString('en-US',{timeZone:'America/Chicago',month:'short',day:'numeric',year:'numeric',hour:'numeric',minute:'2-digit'})+' CT':'';
@@ -257,6 +260,30 @@ const dueInfo=e=>{if(noCal(e))return {k:'nocal',t:'No cal required',n:null};
  if(needsRecal(e))return {k:'recal',t:'Needs recal',n:-99999};
  const d=pd(e&&e['Due date']);if(!d)return {k:'nodate',t:'no due date',n:null};const n=days(TODAY(),d);
  return n<0?{k:'over',t:`overdue ${-n}d`,n}:n<=30?{k:'soon',t:`due in ${n}d`,n}:{k:'ok',t:`${n}d left`,n}};
+/* Due Soon tab: only units whose cal expires in 30 days or less (or already expired). No-cal models are excluded. Days are computed from today so the countdown updates daily. */
+const soonInfo=e=>{if(noCal(e))return null;const d=pd(e&&e['Due date']);if(!d)return null;const n=days(TODAY(),d);if(n>30)return null;
+ if(n<0)return {k:'expired',t:'EXPIRED',n};
+ if(n===0)return {k:'urgent',t:'Due today',n};
+ if(n<=14)return {k:'urgent',t:`${n} day${n===1?'':'s'} left`,n};
+ return {k:'warn',t:`${n} days left`,n}};
+const soonHTML=s=>`<span class="cdown ${s.k}">${esc(s.t)}</span>`;
+function dueSoonPeople(mineOnly){
+  const mine=myTechName();
+  let people=(D.people_equipment||[]).filter(p=>mineOnly?(p.name===mine&&!p.location):true);
+  return people.map(p=>{
+    const units=(p.units||[]).map(e=>{const s=soonInfo(e);return s?{...e,_s:s}:null}).filter(Boolean)
+      .sort((a,b)=>a._s.n-b._s.n);
+    return {...p,units};
+  }).filter(p=>p.units.length);
+}
+function dueSoonBadge(){
+  /* Techs: badge counts only their own units. Admins: count across everyone, for their own view. */
+  const people=dueSoonPeople(techOnly());
+  let n=0,hot=false;
+  people.forEach(p=>p.units.forEach(e=>{n++;if(e._s.n<=14)hot=true}));
+  if(!n)return '';
+  return ` <span class="tab-n${hot?'':' warn'}">${n}</span>`;
+}
 const leftTxt=d=>d.k==='nocal'?'No cal required':d.k==='recal'?'Needs recal':d.n==null?'—':d.n<0?`Overdue ${-d.n} day${d.n===-1?'':'s'}`:d.n===0?'Due today':`${d.n} day${d.n===1?'':'s'}`;
 const leftHTML=d=>`<span class="left ${d.k}"${d.k==='recal'?' title="Send in for cal"':''}>${leftTxt(d)}</span>`;
 const dueWin=d=>d.k==='nocal'?'No cal required':d.k==='recal'||(d.n!=null&&d.n<0)?'Overdue':d.n==null?'No date':d.n<=30?'Due in 30 days':'Later';
@@ -326,6 +353,63 @@ const V={
         <span>Cal ${e['Cal date']?esc(fD(e['Cal date'])):'—'}</span>
         <span>Due ${noCal(e)?'—':(e['Due date']?`<span class="due ${d.k}">${esc(fD(e['Due date']))}</span>`:'—')}</span>
         ${leftHTML(d)} ${tag}</div>${cert}${typo}</button>`;
+  }).join('');
+  list.querySelectorAll('.me-card').forEach(btn=>btn.onclick=async()=>{
+    const e=p.units[+btn.dataset.i];
+    if(!e['Cert PDF']){toast('Cert not on file');return}
+    if(!Auth.live||!Auth.certUrl){toast('Open the live site while signed in to view certs.');return}
+    try{
+      const u=await Auth.certUrl(e['Cert PDF']);
+      window.open(u,'_blank','noopener');
+    }catch(err){toast(err.message||'Could not open cert')}
+  });
+  app.append(list);
+ },
+ duesoon(){head('Due Soon');
+  const blurb=techOnly()
+    ?'Your equipment with calibration due in 30 days or less. The countdown starts at 30 days and updates each day.'
+    :'Units with calibration due in 30 days or less, grouped by person. The countdown starts at 30 days and updates each day.';
+  app.insertAdjacentHTML('beforeend',`<p class="s">${blurb}</p>`);
+  const mineOnly=techOnly();
+  const mine=myTechName();
+  if(mineOnly){
+    const assigned=(D.people_equipment||[]).some(p=>p.name===mine&&!p.location);
+    if(!mine){app.insertAdjacentHTML('beforeend','<p>Your account is not linked to a technician name. Ask an admin to check the email mapping.</p>');return}
+    if(!assigned){app.insertAdjacentHTML('beforeend',`<p>No confirmed equipment is assigned to <b>${esc(mine)}</b> right now.</p>`);return}
+  }
+  let people=dueSoonPeople(mineOnly);
+  if(!people.length){
+    app.insertAdjacentHTML('beforeend', mineOnly
+      ? '<p>None of your equipment is due in the next 30 days.</p>'
+      : '<p>No equipment is due in the next 30 days.</p>');
+    return;
+  }
+  if(!mineOnly){
+    const st=state.duesoon||(state.duesoon={person:people[0].name});
+    if(!people.some(p=>p.name===st.person))st.person=people[0].name;
+    const sw=document.createElement('div');sw.className='me-people';
+    sw.innerHTML=people.map(p=>`<button type="button" class="${p.name===st.person?'on':''}" data-p="${esc(p.name)}">${esc(p.name)} <small>${p.units.length}</small></button>`).join('');
+    sw.querySelectorAll('button').forEach(b=>b.onclick=()=>{state.duesoon.person=b.dataset.p;render()});
+    app.append(sw);
+    people=people.filter(p=>p.name===st.person);
+  }
+  const p=people[0];
+  const expired=p.units.filter(e=>e._s.n<0).length;
+  const urgent=p.units.filter(e=>e._s.n>=0&&e._s.n<=14).length;
+  const warn=p.units.filter(e=>e._s.n>=15).length;
+  kpis([[expired,'expired',!!expired],[urgent,'due in 14 days or less',!!urgent],[warn,'due in 15–30 days',false]]);
+  const list=document.createElement('div');list.className='me-list';
+  list.innerHTML=p.units.map((e,i)=>{
+    const s=e._s, tag=tagHTML(tagOf(e).t)||tagDot(e);
+    const cert=e['Cert PDF']?`<div class="me-cert">Tap to open current cal cert</div>`:`<div class="me-cert missing">Cert not on file</div>`;
+    const typo=e['Cert note']?`<div class="me-cert-note">${esc(e['Cert note'])}</div>`:'';
+    const dueCls=s.n<=14?'over':'soon';
+    return `<button type="button" class="me-card soon-card ${s.k}" data-i="${i}">
+      <div class="soon-head">${soonHTML(s)}</div>
+      <div class="me-top"><b>${esc(descOf(e)||e.Model||e.Unit||'')}</b> ${recalBadge(e)}</div>
+      <div class="me-meta">${assetOf(e)?`<span class="me-asset">${esc(assetOf(e))}</span>`:''}${serialOf(e)?`<span>S/N ${esc(serialOf(e))}</span>`:''}
+        <span>Due <span class="due ${dueCls}">${esc(fD(e['Due date']))}</span></span>
+        ${tag}</div>${cert}${typo}</button>`;
   }).join('');
   list.querySelectorAll('.me-card').forEach(btn=>btn.onclick=async()=>{
     const e=p.units[+btn.dataset.i];
