@@ -125,3 +125,9 @@ dl.kv{display:grid;grid-template-columns:minmax(110px,34%) 1fr;gap:4px 12px;back
 .me-card .me-cert{margin-top:6px;font-size:13px;color:#5a6573}
 .me-card .me-cert.missing{font-style:italic}
 body.tech-only #gq{display:none}
+
+.due.recal{color:#c62828;font-weight:700}
+.left.recal{background:#fdecea;color:#c62828;font-weight:700}
+.recal-badge{display:inline-block;background:#c62828;color:#fff;border-radius:12px;padding:2px 8px;font-size:12px;font-weight:700;margin-left:4px;vertical-align:middle}
+.me-card.needs-recal{border:1px solid #c62828}
+tr.r-recal, .crd.r-recal{box-shadow:inset 4px 0 0 #c62828}

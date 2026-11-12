@@ -188,7 +188,7 @@ async function renderOrderPdf(el){
 function openRental(r){const c=r._c;openPanel(r.Item,`<p>${stPill(r)} ${oLink(r.Order)}</p>
  <div class="tots"><div><b>${c.spent!=null?usd2(c.spent):'?'}</b><span>${c.spent==null?'price unknown':c.est?'estimate':'actual invoiced'}</span></div><div><b>${c.days??''}</b><span>days</span></div></div>
  ${kv({...r,'Days out':c.days},['Item','Status','Order','Who (ordered by)','Where (ship to / job)'])}<p class="s">${esc(c.basis||'')}</p>`,'rental='+r._i)}
-function openUnit(e){const d=dueInfo(e);openPanel(e.Unit+' · '+e.Model,`<p>${pill(statusLabel(e),e.Status==='MISSING'?'red':e.Status==='NOT CONFIRMED'?'amber':'green')} <span class="due ${d.k}">${esc(d.t)}</span> ${leftHTML(d)} ${tagDot(e)} ${who(e.Holder)}</p>
+function openUnit(e){const d=dueInfo(e);openPanel(e.Unit+' · '+e.Model,`<p>${pill(statusLabel(e),e.Status==='MISSING'?'red':e.Status==='NOT CONFIRMED'?'amber':'green')} ${recalBadge(e)} <span class="due ${d.k}">${esc(d.t)}</span> ${leftHTML(d)} ${tagDot(e)} ${who(e.Holder)}</p>
  ${kv(e,['Certs','Notes'])}${e.Notes?`<h3>Notes</h3><p class="note">${linkOrders(e.Notes)}</p>`:''}${(e.Certs||[]).length?`<h3>Cert file(s)</h3>${e.Certs.map(p=>`<span class="path">${esc(p)}</span>`).join('')}`:'<p class="s">No cert file found.</p>'}`,'unit='+encodeURIComponent(e.Unit+'|'+e.Serial))}
 const openRow=(title,r)=>openPanel(title,kv(r));
 function openJob(j){
@@ -243,11 +243,15 @@ function render(){nav();app.innerHTML='';(V[tab]||V.rentals)();Combo.scan();wind
 const fmtT=t=>t?new Date(t).toLocaleString('en-US',{timeZone:'America/Chicago',month:'short',day:'numeric',year:'numeric',hour:'numeric',minute:'2-digit'})+' CT':'';
 const head=h=>{const d=document.createElement('div');d.className='hd';d.innerHTML=`<h1>${h}</h1><span class="s">Data as of ${fmtT(D.built)}</span>`;app.append(d)};
 const noCal=e=>!!(e&&(e._no_cal||e['Cal required']===false||/no cal required/i.test(e['Cal status']||'')));
-const dueInfo=e=>{if(noCal(e))return {k:'nocal',t:'No cal required',n:null};const d=pd(e&&e['Due date']);if(!d)return {k:'nodate',t:'no due date',n:null};const n=days(TODAY(),d);
+const needsRecal=e=>!!(e&&(e._recal||e['Needs recal']));
+const recalBadge=e=>needsRecal(e)?`<span class="recal-badge" title="Send in for cal">Needs recal</span>`:'';
+const dueInfo=e=>{if(noCal(e))return {k:'nocal',t:'No cal required',n:null};
+ if(needsRecal(e))return {k:'recal',t:'Needs recal',n:-99999};
+ const d=pd(e&&e['Due date']);if(!d)return {k:'nodate',t:'no due date',n:null};const n=days(TODAY(),d);
  return n<0?{k:'over',t:`overdue ${-n}d`,n}:n<=30?{k:'soon',t:`due in ${n}d`,n}:{k:'ok',t:`${n}d left`,n}};
-const leftTxt=d=>d.k==='nocal'?'No cal required':d.n==null?'—':d.n<0?`Overdue ${-d.n} day${d.n===-1?'':'s'}`:d.n===0?'Due today':`${d.n} day${d.n===1?'':'s'}`;
-const leftHTML=d=>`<span class="left ${d.k}">${leftTxt(d)}</span>`;
-const dueWin=d=>d.k==='nocal'?'No cal required':d.n==null?'No date':d.n<0?'Overdue':d.n<=30?'Due in 30 days':'Later';
+const leftTxt=d=>d.k==='nocal'?'No cal required':d.k==='recal'?'Needs recal':d.n==null?'—':d.n<0?`Overdue ${-d.n} day${d.n===-1?'':'s'}`:d.n===0?'Due today':`${d.n} day${d.n===1?'':'s'}`;
+const leftHTML=d=>`<span class="left ${d.k}"${d.k==='recal'?' title="Send in for cal"':''}>${leftTxt(d)}</span>`;
+const dueWin=d=>d.k==='nocal'?'No cal required':d.k==='recal'||(d.n!=null&&d.n<0)?'Overdue':d.n==null?'No date':d.n<=30?'Due in 30 days':'Later';
 const leftCol={k:'_left',label:'Days left',s:x=>x._d.n,v:x=>leftTxt(x._d),html:x=>leftHTML(x._d)};
 const quickDue=(key,E)=>{const st=state[key]||(state[key]={q:'',f:{},sort:'Days left',dir:1,n:100,more:false});const cur=st.f['Due window']||'';
  const b=document.createElement('div');b.className='qf';b.innerHTML=['','Overdue','Due in 30 days'].map(v=>`<button class="${cur===v?'on':''}" data-v="${v}">${v||'All'} <small>${v?E.filter(e=>dueWin(e._d)===v||(v==='Due in 30 days'&&e._d.k==='soon')).length:E.length}</small></button>`).join('');
@@ -300,14 +304,15 @@ const V={
     visible=visible.filter(p=>p.name===st.person);
   }
   const p=visible[0];
-  const n=p.units.length, missing=p.units.filter(e=>!e['Cert PDF']).length;
-  kpis([[n,'confirmed unit'+(n===1?'':'s'),false],[missing,'cert not on file',!!missing]]);
+  p.units=[...p.units].sort((a,b)=>(a._d.n??9e9)-(b._d.n??9e9));
+  const n=p.units.length, missing=p.units.filter(e=>!e['Cert PDF']).length, recals=p.units.filter(needsRecal).length;
+  kpis([[n,'confirmed unit'+(n===1?'':'s'),false],[missing,'cert not on file',!!missing],[recals,'needs recal',!!recals]]);
   const list=document.createElement('div');list.className='me-list';
   list.innerHTML=p.units.map((e,i)=>{
     const d=e._d, tag=tagHTML(tagOf(e).t)||tagDot(e);
     const cert=e['Cert PDF']?`<div class="me-cert">Tap to open current cal cert</div>`:`<div class="me-cert missing">Cert not on file</div>`;
-    return `<button type="button" class="me-card" data-i="${i}">
-      <div class="me-top"><b>${esc(e.Unit)}</b> <span>${esc(e.Model||'')}</span></div>
+    return `<button type="button" class="me-card${needsRecal(e)?' needs-recal':''}" data-i="${i}">
+      <div class="me-top"><b>${esc(e.Unit)}</b> <span>${esc(e.Model||'')}</span> ${recalBadge(e)}</div>
       <div class="me-meta"><span>S/N ${esc(e.Serial||'—')}</span>
         <span>Cal ${e['Cal date']?esc(fD(e['Cal date'])):'—'}</span>
         <span>Due ${noCal(e)?'—':(e['Due date']?`<span class="due ${d.k}">${esc(fD(e['Due date']))}</span>`:'—')}</span>
@@ -326,10 +331,10 @@ const V={
  },
  equipment(){head('Equipment');
   const E=D.equipment.map(e=>({...e,_d:dueInfo(e)}));const c=f=>E.filter(f).length;
-  kpis([[E.length,'units'],[c(e=>e.Status==='MISSING'),'missing',1],[c(e=>e.Status==='NOT CONFIRMED'),'assigned, not confirmed',1],[c(e=>e._d.k==='over'),'cal overdue',1],[c(e=>e._d.k==='soon'),'due within 30 days']]);
-  const dl=e=>({over:'Overdue',soon:'Due soon',ok:'OK',nodate:'No date',nocal:'No cal required'})[e._d.k];
+  kpis([[E.length,'units'],[c(e=>e.Status==='MISSING'),'missing',1],[c(e=>e.Status==='NOT CONFIRMED'),'assigned, not confirmed',1],[c(e=>e._d.k==='over'||e._d.k==='recal'),'cal overdue',1],[c(e=>e._d.k==='soon'),'due within 30 days'],[c(needsRecal),'needs recal',c(needsRecal)]]);
+  const dl=e=>({over:'Overdue',soon:'Due soon',ok:'OK',nodate:'No date',nocal:'No cal required',recal:'Needs recal'})[e._d.k];
   app.append(quickDue('equipment',E));app.append(legend(E.map(e=>e.Holder)));
-  app.append(listView('equipment',E,{what:'unit, model, serial, holder',open:openUnit,rowClass:e=>(e.Status==='MISSING'?'r-miss ':'')+'tag-'+(TAGC[tagOf(e).t]||''),
+  app.append(listView('equipment',E,{what:'unit, model, serial, holder',open:openUnit,rowClass:e=>(e.Status==='MISSING'?'r-miss ':'')+(needsRecal(e)?'r-recal ':'')+'tag-'+(TAGC[tagOf(e).t]||''),
    cols:[{k:'Unit',label:'Asset',html:e=>`<b>${esc(e.Unit)}</b>`},{k:'Model'},{k:'Holder',html:e=>who(e.Holder)},{k:'tag',label:'Tag color',s:e=>tagOf(e).t,v:e=>TAGN[tagOf(e).t]||'None',html:tagDot},{k:'Due date',label:'Cal due',s:e=>e['Due date'],v:e=>e['Due date'],html:e=>e['Due date']?`<span class="due ${e._d.k}">${fD(e['Due date'])}</span>`:''},leftCol,
     {k:'Status',html:e=>pill(statusLabel(e),e.Status==='MISSING'?'red':e.Status==='NOT CONFIRMED'?'amber':'green')}],
    filters:[{k:'Status'},{k:'Holder',v:e=>placeLabel(e.Holder)},{k:'due',label:'Cal due',v:dl},{k:'tag',label:'Tag color',v:e=>TAGN[tagOf(e).t]||'None'}],more:[{k:'Cal tag'},{k:'Model'},{k:'dw',label:'Due window',v:e=>e._d.k==='soon'?'Due in 30 days':dueWin(e._d)}]}));
