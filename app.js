@@ -203,6 +203,7 @@ function openJob(j){
  const name=j.Job||'';
  const hdr={
   'Job':name,
+  ...(j['Job number']?{'Job number':j['Job number']}:{}),
   'Rentals':j.Rentals,
   'Models':j.Models,
   'Date range':(j.From&&j.To)?(j.From===j.To?j.From:j.From+' → '+j.To):(j.From||j.To||''),
@@ -421,12 +422,12 @@ const V={
    _who:j['Ordered by summary']||'',
    _ship:j['Ship to summary']||''
   }));
-  app.append(listView('jobs',rows,{title:'Jobs',what:'job, who, ship-to, model, order',sort:'On rent',dir:-1,
+  app.append(listView('jobs',rows,{title:'Jobs',what:'job, job number, who, ship-to, model, order',sort:'On rent',dir:-1,
    open:r=>openJob(r),
    rowClass:r=>r.Job==='Unassigned'?'':(r.Active?'r-on':''),
    pre:r=>{const ua=r.filter(x=>x.Job==='Unassigned');return r.filter(x=>x.Job!=='Unassigned').concat(ua)},
    cols:[
-    {k:'Job',html:r=>r.Job==='Unassigned'?`<span class="pill amber">Unassigned</span>`:`<b>${esc(r.Job)}</b>`},
+    {k:'Job',html:r=>r.Job==='Unassigned'?`<span class="pill amber">Unassigned</span>`:`<b>${esc(r.Job)}</b>${r['Job number']?` <span class="stamp">${esc(r['Job number'])}</span>`:''}`},
     {k:'Rentals'},
     {k:'Models',html:r=>`<span title="${esc((r['Model list']||[]).join(', '))}">${r.Models}</span>`},
     {k:'_range',label:'Dates'},
