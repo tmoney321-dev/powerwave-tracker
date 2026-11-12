@@ -189,6 +189,7 @@ function openRental(r){const c=r._c;openPanel(r.Item,`<p>${stPill(r)} ${oLink(r.
  <div class="tots"><div><b>${c.spent!=null?usd2(c.spent):'?'}</b><span>${c.spent==null?'price unknown':c.est?'estimate':'actual invoiced'}</span></div><div><b>${c.days??''}</b><span>days</span></div></div>
  ${kv({...r,'Days out':c.days},['Item','Status','Order','Who (ordered by)','Where (ship to / job)'])}<p class="s">${esc(c.basis||'')}</p>`,'rental='+r._i)}
 function openUnit(e){const d=dueInfo(e);openPanel(e.Unit+' · '+e.Model,`<p>${pill(statusLabel(e),e.Status==='MISSING'?'red':e.Status==='NOT CONFIRMED'?'amber':'green')} ${recalBadge(e)} <span class="due ${d.k}">${esc(d.t)}</span> ${leftHTML(d)} ${tagDot(e)} ${who(e.Holder)}</p>
+ ${e['Cert note']?`<p class="me-cert-note">${esc(e['Cert note'])}</p>`:''}
  ${kv(e,['Certs','Notes'])}${e.Notes?`<h3>Notes</h3><p class="note">${linkOrders(e.Notes)}</p>`:''}${(e.Certs||[]).length?`<h3>Cert file(s)</h3>${e.Certs.map(p=>`<span class="path">${esc(p)}</span>`).join('')}`:'<p class="s">No cert file found.</p>'}`,'unit='+encodeURIComponent(e.Unit+'|'+e.Serial))}
 const openRow=(title,r)=>openPanel(title,kv(r));
 function openJob(j){
@@ -311,12 +312,13 @@ const V={
   list.innerHTML=p.units.map((e,i)=>{
     const d=e._d, tag=tagHTML(tagOf(e).t)||tagDot(e);
     const cert=e['Cert PDF']?`<div class="me-cert">Tap to open current cal cert</div>`:`<div class="me-cert missing">Cert not on file</div>`;
+    const typo=e['Cert note']?`<div class="me-cert-note">${esc(e['Cert note'])}</div>`:'';
     return `<button type="button" class="me-card${needsRecal(e)?' needs-recal':''}" data-i="${i}">
       <div class="me-top"><b>${esc(e.Unit)}</b> <span>${esc(e.Model||'')}</span> ${recalBadge(e)}</div>
       <div class="me-meta"><span>S/N ${esc(e.Serial||'—')}</span>
         <span>Cal ${e['Cal date']?esc(fD(e['Cal date'])):'—'}</span>
         <span>Due ${noCal(e)?'—':(e['Due date']?`<span class="due ${d.k}">${esc(fD(e['Due date']))}</span>`:'—')}</span>
-        ${leftHTML(d)} ${tag}</div>${cert}</button>`;
+        ${leftHTML(d)} ${tag}</div>${cert}${typo}</button>`;
   }).join('');
   list.querySelectorAll('.me-card').forEach(btn=>btn.onclick=async()=>{
     const e=p.units[+btn.dataset.i];

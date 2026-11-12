@@ -131,3 +131,4 @@ body.tech-only #gq{display:none}
 .recal-badge{display:inline-block;background:#c62828;color:#fff;border-radius:12px;padding:2px 8px;font-size:12px;font-weight:700;margin-left:4px;vertical-align:middle}
 .me-card.needs-recal{border:1px solid #c62828}
 tr.r-recal, .crd.r-recal{box-shadow:inset 4px 0 0 #c62828}
+.me-cert-note{margin-top:4px;font-size:12px;color:#5a6573;font-style:italic}
