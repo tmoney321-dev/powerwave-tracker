@@ -12,9 +12,28 @@ const Auth=(()=>{
   <div class="row"><button id="lin">Sign in</button><button class="sec" id="lup">Request access</button><button class="sec" id="lfg">Forgot password</button></div><p class="s" id="lmsg">${esc(msg||'')}</p></div>`}
  function showLogin(msg,resolve){const el=lg();el.hidden=false;el.innerHTML=loginHTML(msg);const v=()=>[el.querySelector('#le').value.trim(),el.querySelector('#lp').value];
   const say=t=>el.querySelector('#lmsg').textContent=t;
-  el.querySelector('#lin').onclick=async()=>{const [e,p]=v();const {error}=await sb.auth.signInWithPassword({email:e,password:p});if(error)say(error.message);else start().then(resolve)};
+  el.querySelector('#lin').onclick=async()=>{const [e,p]=v();const {error}=await sb.auth.signInWithPassword({email:e,password:p});if(error)say(error.message);else{currentPw=p;start().then(resolve)}};
   el.querySelector('#lup').onclick=async()=>{const [e,p]=v();if(p.length<10)return say('Choose a password of 10+ characters.');const {error}=await sb.auth.signUp({email:e,password:p});say(error?error.message:'Account requested. Confirm your email if asked, then an admin must approve you.')};
   el.querySelector('#lfg').onclick=async()=>{const [e]=v();const {error}=await sb.auth.resetPasswordForEmail(e,{redirectTo:location.href.split('#')[0]});say(error?error.message:'Reset email sent.')};}
+ let currentPw=null;
+ function needsNewPassword(user){return !!(user&&user.user_metadata&&user.user_metadata.must_change_password===true)}
+ function showSetPassword(resolve){const el=lg();el.hidden=false;el.innerHTML=`<div class="lbox"><h2>Set a new password</h2>
+  <p class="s">You must choose a new password before continuing. Use at least 8 characters, and don't reuse your current password.</p>
+  <input id="np1" type="password" placeholder="New password" autocomplete="new-password">
+  <input id="np2" type="password" placeholder="Confirm new password" autocomplete="new-password">
+  <div class="row"><button id="nsave">Save and continue</button><button class="sec" id="lout">Sign out</button></div>
+  <p class="s" id="lmsg"></p></div>`;
+  const say=t=>el.querySelector('#lmsg').textContent=t;
+  el.querySelector('#lout').onclick=signOut;
+  const save=async()=>{const a=el.querySelector('#np1').value,b=el.querySelector('#np2').value;
+   if(a.length<8)return say('Use at least 8 characters.');
+   if(a!==b)return say('The two passwords do not match.');
+   if(currentPw!=null&&a===currentPw)return say('Choose a different password from your current one.');
+   const {error}=await sb.auth.updateUser({password:a,data:{must_change_password:false}});
+   if(error)return say(error.message);
+   currentPw=null;start().then(resolve)};
+  el.querySelector('#nsave').onclick=save;
+  el.querySelectorAll('#np1,#np2').forEach(i=>i.addEventListener('keydown',e=>{if(e.key==='Enter')save()}));}
  async function start(){
   if(!live){if(C.LOCAL_DEV){role='admin';email='local-dev';document.getElementById('banner').innerHTML='<div class="warn">LOCAL DEV MODE: no login, data read from ./data/site_data.json. Never host this build.</div>';
     const r=await fetch('data/site_data.json',{cache:'no-store'});return r.json()}
@@ -22,6 +41,9 @@ const Auth=(()=>{
   const {data:{session}}=await sb.auth.getSession();
   if(!session)return new Promise(res=>showLogin('',res));
   email=session.user.email;
+  let user=session.user;
+  try{const r=await sb.auth.getUser();if(r.data&&r.data.user)user=r.data.user}catch(e){}
+  if(needsNewPassword(user))return new Promise(res=>showSetPassword(res));
   const {data:p}=await sb.from('profiles').select('role,name').eq('id',session.user.id).maybeSingle();role=p?p.role:'pending';name=p&&p.name;
   if(role!=='admin'&&role!=='user'){lg().hidden=false;lg().innerHTML=`<div class="lbox"><h2>Waiting for approval</h2><p>Signed in as <b>${esc(email)}</b>. An admin must approve your account before you can see any data.</p><div class="row"><button id="lchk">Check again</button><button class="sec" id="lout">Sign out</button></div></div>`;
    return new Promise(res=>{lg().querySelector('#lchk').onclick=()=>start().then(res);lg().querySelector('#lout').onclick=signOut})}
