@@ -188,7 +188,13 @@ async function renderOrderPdf(el){
 function openRental(r){const c=r._c;openPanel(r.Item,`<p>${stPill(r)} ${oLink(r.Order)}</p>
  <div class="tots"><div><b>${c.spent!=null?usd2(c.spent):'?'}</b><span>${c.spent==null?'price unknown':c.est?'estimate':'actual invoiced'}</span></div><div><b>${c.days??''}</b><span>days</span></div></div>
  ${kv({...r,'Days out':c.days},['Item','Status','Order','Who (ordered by)','Where (ship to / job)'])}<p class="s">${esc(c.basis||'')}</p>`,'rental='+r._i)}
-function openUnit(e){const d=dueInfo(e);openPanel(e.Unit+' · '+e.Model,`<p>${pill(statusLabel(e),e.Status==='MISSING'?'red':e.Status==='NOT CONFIRMED'?'amber':'green')} ${recalBadge(e)} <span class="due ${d.k}">${esc(d.t)}</span> ${leftHTML(d)} ${tagDot(e)} ${who(e.Holder)}</p>
+const descOf=e=>(e&&(e.Description||e.Model||e.Item||e['Make / Model']||'')).trim();
+const assetOf=e=>{for(const v of [e&&e.Asset,e&&e.Unit,e&&e['Unit ID'],e&&e.Barcode]){const u=String(v||'').trim();if(/^(PWS|R|I)\d+/i.test(u))return u.replace(/^pws/i,'PWS').replace(/^r/i,'R').replace(/^i/i,'I')}return ''};
+const serialOf=e=>{const s=String((e&&e.Serial)||'').trim();return(!s||/^n\/?a$/i.test(s))?'':s};
+const idLine=e=>{const a=assetOf(e),s=serialOf(e);return [a,s?('S/N '+s):''].filter(Boolean).join(' · ')};
+
+function openUnit(e){const d=dueInfo(e);openPanel(descOf(e)||(e.Unit+' · '+e.Model),`<p>${pill(statusLabel(e),e.Status==='MISSING'?'red':e.Status==='NOT CONFIRMED'?'amber':'green')} ${recalBadge(e)} <span class="due ${d.k}">${esc(d.t)}</span> ${leftHTML(d)} ${tagDot(e)} ${who(e.Holder)}</p>
+ <p class="me-ids">${esc(idLine(e)||'')}</p>
  ${e['Cert note']?`<p class="me-cert-note">${esc(e['Cert note'])}</p>`:''}
  ${kv(e,['Certs','Notes'])}${e.Notes?`<h3>Notes</h3><p class="note">${linkOrders(e.Notes)}</p>`:''}${(e.Certs||[]).length?`<h3>Cert file(s)</h3>${e.Certs.map(p=>`<span class="path">${esc(p)}</span>`).join('')}`:'<p class="s">No cert file found.</p>'}`,'unit='+encodeURIComponent(e.Unit+'|'+e.Serial))}
 const openRow=(title,r)=>openPanel(title,kv(r));
@@ -211,8 +217,8 @@ function openJob(j){
   return `<div class="job-ord"><div class="lt">${oLink(o.Order)} <span class="s">${esc(o.Date||'')}</span> ${who(o['Ordered by'])} ${o['On rent']?pill(o['On rent']+' on rent','green'):''}</div>
    <div class="lm">${esc(o['Ship to']||'')}</div>${items}</div>`}).join('')||'<p class="s">No orders</p>';
  const pw=j['Powerwave equipment']||[];
- const pwHtml=pw.length?`<h3>Powerwave-owned equipment on this job</h3>${pw.map(e=>`<div class="line"><div class="lt"><b>${esc(e.Unit||e.Serial||'')}</b> ${esc(e.Model||'')} ${pill(statusLabel(e),e.Status==='MISSING'?'red':e.Status==='NOT CONFIRMED'?'amber':'green')}</div>
-  <div class="lm">${[e.Serial&&('S/N '+esc(e.Serial)),e.Holder&&who(e.Holder)].filter(Boolean).join(' · ')}</div></div>`).join('')}`:'';
+ const pwHtml=pw.length?`<h3>Powerwave-owned equipment on this job</h3>${pw.map(e=>`<div class="line"><div class="lt"><b>${esc(descOf(e)||e.Model||'')}</b> ${pill(statusLabel(e),e.Status==='MISSING'?'red':e.Status==='NOT CONFIRMED'?'amber':'green')}</div>
+  <div class="lm">${[idLine(e),e.Holder&&who(e.Holder)].filter(Boolean).join(' · ')}</div></div>`).join('')}`:'';
  const html=`${kv(hdr)}
   <p class="s">No dollar amounts on this tab.</p>
   <h3>Orders (${orders.length})</h3>${ordHtml}${pwHtml}`;
@@ -271,7 +277,7 @@ const V={
   const st=state.rentals||(state.rentals={q:'',f:{},sort:null,dir:-1,n:100,more:false});
   app.append(listView('rentals',R,{what:'item, order, person, serial',open:openRental,rowClass:r=>isOn(r)?'r-on':'',
    pre:r=>state.rentals.sort?r:[...r].sort((a,b)=>(isOn(b)-isOn(a))||String(b['Out date']).localeCompare(String(a['Out date']))),
-   cols:[{k:'Item',html:r=>`<b>${esc(r.Item)}</b>`},{k:'Order',html:r=>oLink(r.Order)},{k:'Who',html:r=>who(r['Placed by']&&r['Placed by']!=='(unknown)'?r['Placed by']:(r['Who (ordered by)']!=='(unknown)'?r['Who (ordered by)']:'')),v:r=>r['Placed by']&&r['Placed by']!=='(unknown)'?r['Placed by']:(r['Who (ordered by)']!=='(unknown)'?r['Who (ordered by)']:'')},
+   cols:[{k:'Item',label:'Equipment',html:r=>`<b>${esc(r.Description||r.Item||'')}</b>${idLine(r)?`<div class="s">${esc(idLine(r))}</div>`:''}`},{k:'Order',html:r=>oLink(r.Order)},{k:'Who',html:r=>who(r['Placed by']&&r['Placed by']!=='(unknown)'?r['Placed by']:(r['Who (ordered by)']!=='(unknown)'?r['Who (ordered by)']:'')),v:r=>r['Placed by']&&r['Placed by']!=='(unknown)'?r['Placed by']:(r['Who (ordered by)']!=='(unknown)'?r['Who (ordered by)']:'')},
     {k:'Where',v:r=>r.Job||r['Ship to']||r['Where (ship to / job)']||''},{k:'Days out',v:r=>r._c.days},
     {k:'$ spent',v:r=>r._c.spent,html:r=>r._c.spent!=null?`${usd(r._c.spent)}${r._c.est?' <small class="est">est.</small>':''}`:'<span class="unk">?</span>'},
     {k:'Status',v:r=>isOn(r)?'On rent':r.Status==='RETURNED'?'Returned':'Likely returned',html:stPill}],
@@ -314,8 +320,8 @@ const V={
     const cert=e['Cert PDF']?`<div class="me-cert">Tap to open current cal cert</div>`:`<div class="me-cert missing">Cert not on file</div>`;
     const typo=e['Cert note']?`<div class="me-cert-note">${esc(e['Cert note'])}</div>`:'';
     return `<button type="button" class="me-card${needsRecal(e)?' needs-recal':''}" data-i="${i}">
-      <div class="me-top"><b>${esc(e.Unit)}</b> <span>${esc(e.Model||'')}</span> ${recalBadge(e)}</div>
-      <div class="me-meta"><span>S/N ${esc(e.Serial||'—')}</span>
+      <div class="me-top"><b>${esc(descOf(e)||e.Model||e.Unit||'')}</b> ${recalBadge(e)}</div>
+      <div class="me-meta">${assetOf(e)?`<span class="me-asset">${esc(assetOf(e))}</span>`:''}${serialOf(e)?`<span>S/N ${esc(serialOf(e))}</span>`:''}
         <span>Cal ${e['Cal date']?esc(fD(e['Cal date'])):'—'}</span>
         <span>Due ${noCal(e)?'—':(e['Due date']?`<span class="due ${d.k}">${esc(fD(e['Due date']))}</span>`:'—')}</span>
         ${leftHTML(d)} ${tag}</div>${cert}${typo}</button>`;
@@ -336,17 +342,17 @@ const V={
   kpis([[E.length,'units'],[c(e=>e.Status==='MISSING'),'missing',1],[c(e=>e.Status==='NOT CONFIRMED'),'assigned, not confirmed',1],[c(e=>e._d.k==='over'||e._d.k==='recal'),'cal overdue',1],[c(e=>e._d.k==='soon'),'due within 30 days'],[c(needsRecal),'needs recal',c(needsRecal)]]);
   const dl=e=>({over:'Overdue',soon:'Due soon',ok:'OK',nodate:'No date',nocal:'No cal required',recal:'Needs recal'})[e._d.k];
   app.append(quickDue('equipment',E));app.append(legend(E.map(e=>e.Holder)));
-  app.append(listView('equipment',E,{what:'unit, model, serial, holder',open:openUnit,rowClass:e=>(e.Status==='MISSING'?'r-miss ':'')+(needsRecal(e)?'r-recal ':'')+'tag-'+(TAGC[tagOf(e).t]||''),
-   cols:[{k:'Unit',label:'Asset',html:e=>`<b>${esc(e.Unit)}</b>`},{k:'Model'},{k:'Holder',html:e=>who(e.Holder)},{k:'tag',label:'Tag color',s:e=>tagOf(e).t,v:e=>TAGN[tagOf(e).t]||'None',html:tagDot},{k:'Due date',label:'Cal due',s:e=>e['Due date'],v:e=>e['Due date'],html:e=>e['Due date']?`<span class="due ${e._d.k}">${fD(e['Due date'])}</span>`:''},leftCol,
+  app.append(listView('equipment',E,{what:'description, asset, serial, holder',open:openUnit,rowClass:e=>(e.Status==='MISSING'?'r-miss ':'')+(needsRecal(e)?'r-recal ':'')+'tag-'+(TAGC[tagOf(e).t]||''),
+   cols:[{k:'Description',label:'Equipment',html:e=>`<b>${esc(descOf(e))}</b>`},{k:'Asset',s:e=>assetOf(e),v:e=>assetOf(e),html:e=>assetOf(e)?esc(assetOf(e)):'—'},{k:'Serial',s:e=>serialOf(e),v:e=>serialOf(e),html:e=>serialOf(e)?esc(serialOf(e)):'—'},{k:'Holder',html:e=>who(e.Holder)},{k:'tag',label:'Tag color',s:e=>tagOf(e).t,v:e=>TAGN[tagOf(e).t]||'None',html:tagDot},{k:'Due date',label:'Cal due',s:e=>e['Due date'],v:e=>e['Due date'],html:e=>e['Due date']?`<span class="due ${e._d.k}">${fD(e['Due date'])}</span>`:''},leftCol,
     {k:'Status',html:e=>pill(statusLabel(e),e.Status==='MISSING'?'red':e.Status==='NOT CONFIRMED'?'amber':'green')}],
    filters:[{k:'Status'},{k:'Holder',v:e=>placeLabel(e.Holder)},{k:'due',label:'Cal due',v:dl},{k:'tag',label:'Tag color',v:e=>TAGN[tagOf(e).t]||'None'}],more:[{k:'Cal tag'},{k:'Model'},{k:'dw',label:'Due window',v:e=>e._d.k==='soon'?'Due in 30 days':dueWin(e._d)}]}));
  },
  tech(){head('Tech Assignments');
   const EU={};D.equipment.forEach(e=>{if(e.Unit&&!EU[e.Unit])EU[e.Unit]=e});
-  const T=D.tech.map(r=>{const e=EU[r.Unit];return {...r,_tg:e?tagOf(e).t:r['Cal tag'],'Cal due':e?e['Due date']:'',_d:dueInfo(e||{})}});
+  const T=D.tech.map(r=>{const e=EU[r.Unit]||D.equipment.find(x=>x.Unit===r.Unit||(r.Unit&&x.Serial&&x.Serial===r.Unit));return {...r,...(e?{Description:e.Description,Asset:e.Asset||assetOf(e),Serial:e.Serial||r.Serial,Model:e.Model}:{}) ,_eq:e,_tg:e?tagOf(e).t:r['Cal tag'],'Cal due':e?e['Due date']:'',_d:dueInfo(e||{})}});
   app.append(quickDue('tech',T));app.append(legend(T.map(r=>r.Technician)));
-  app.append(listView('tech',T,{what:'tech, unit, item',open:r=>openRow(r.Technician+' · '+(r.Unit||''),r),
-   cols:[{k:'Technician',label:'Tech',html:r=>`<b>${who(r.Technician)}</b>`},{k:'Item / note',label:'Equipment',v:r=>String(r['Item / note']||'').replace(/\s*\[(JAN|MAY|SEP)\]\s*$/,'')},{k:'Unit',label:'Asset'},{k:'tag',label:'Tag color',s:r=>r._tg,v:r=>TAGN[r._tg]||'None',html:r=>tagDot({'Cal tag':r._tg})},
+  app.append(listView('tech',T,{what:'tech, description, asset, serial',open:r=>openRow(r.Technician+' · '+(descOf(r)||r.Unit||''),r),
+   cols:[{k:'Technician',label:'Tech',html:r=>`<b>${who(r.Technician)}</b>`},{k:'Description',label:'Equipment',html:r=>`<b>${esc(descOf(r)||String(r['Item / note']||'').replace(/\s*\[(JAN|MAY|SEP)\]\s*$/,''))}</b>`},{k:'Asset',s:r=>assetOf(r),v:r=>assetOf(r),html:r=>assetOf(r)?esc(assetOf(r)):'—'},{k:'Serial',s:r=>serialOf(r),v:r=>serialOf(r),html:r=>serialOf(r)?esc(serialOf(r)):'—'},{k:'tag',label:'Tag color',s:r=>r._tg,v:r=>TAGN[r._tg]||'None',html:r=>tagDot({'Cal tag':r._tg})},
     {k:'Cal due',s:r=>r['Cal due'],v:r=>r['Cal due'],html:r=>r['Cal due']?`<span class="due ${r._d.k}">${fD(r['Cal due'])}</span>`:''},leftCol],
    filters:[{k:'Technician',label:'Tech'},{k:'Category'},{k:'tag',label:'Tag color',v:r=>TAGN[r._tg]||'None'}],more:[{k:'Cal tag'},{k:'dw',label:'Due window',v:r=>r._d.k==='soon'?'Due in 30 days':dueWin(r._d)}]}));
   const cols=rows=>{const ks=[];rows.forEach(r=>Object.keys(r).forEach(k=>{if(!ks.includes(k)&&!HIDE.test(k))ks.push(k)}));return ks};
@@ -354,9 +360,9 @@ const V={
   if(D.roster.length)app.append(fold('Employee roster',listView('roster',D.roster,{what:'employees',cols:[{k:'Employee'}]})));
  },
  certsneeded(){head('Certs Needed');
-  app.append(listView('cn',D.certs_needed,{what:'asset, model, serial',open:r=>openRow((r['Unit ID']||'')+' · '+(r['Make / Model']||''),r),
+  app.append(listView('cn',D.certs_needed,{what:'description, asset, serial',open:r=>openRow((descOf(r)||r['Unit ID']||'')+' · '+(idLine(r)||''),r),
    rowClass:r=>/EXPIRED/i.test(r.Category)?'r-miss':/DONE/i.test(r.Category)?'r-ok':'',
-   cols:[{k:'Unit ID',label:'Asset',html:r=>`<b>${esc(r['Unit ID'])}</b>`},{k:'Make / Model',label:'Item'},{k:'Category',label:'Status',v:r=>String(r.Category||'').replace(/^\d+\.\s*/,'')}],
+   cols:[{k:'Description',label:'Equipment',html:r=>`<b>${esc(descOf(r)||r['Make / Model']||'')}</b>`},{k:'Asset',s:r=>assetOf(r),v:r=>assetOf(r),html:r=>assetOf(r)?esc(assetOf(r)):(r['Unit ID']||'—')},{k:'Serial',s:r=>serialOf(r),v:r=>serialOf(r),html:r=>serialOf(r)?esc(serialOf(r)):'—'},{k:'Category',label:'Status',v:r=>String(r.Category||'').replace(/^\d+\.\s*/,'')}],
    filters:[{k:'Category',label:'Status',v:r=>String(r.Category||'').replace(/^\d+\.\s*/,'')},{k:'Who has it'}]}));
  },
  orders(){head('Intellirent Orders');
@@ -586,9 +592,9 @@ function sourcesEl(){const d=document.createElement('div');
 
 /* ---------- global search ---------- */
 function gsets(){return [['Orders','o',Object.values(OI),x=>`${x.no} · ${x.type} · ${x.who} · ${x.where} · ${x.status}`,x=>openOrder(x.no)],
- ['Live Rentals','r',R,r=>`${r.Item} · ${r.Order} · ${isOn(r)?'On rent':'Returned'}`,openRental],['Equipment','e',D.equipment,r=>`${r.Unit} · ${r.Model} · S/N ${r.Serial} · ${r.Holder} · ${r.Status}`,openUnit],
- ['Tech Assignments','t',D.tech,r=>`${r.Technician} · ${r['Item / note']}`,r=>openRow(r.Technician,r)],['Tech Replies','tr',D.tech_replies,r=>Object.values(r)[0]+' · '+(Object.values(r)[1]||''),r=>openRow(Object.values(r)[0],r)],
- ['Certs Needed','c',D.certs_needed,r=>`${r['Unit ID']} · ${r['Make / Model']} · ${r.Category}`,r=>openRow(r['Unit ID'],r)]]}
+ ['Live Rentals','r',R,r=>`${r.Description||r.Item} · ${idLine(r)} · ${r.Order} · ${isOn(r)?'On rent':'Returned'}`,openRental],['Equipment','e',D.equipment,r=>`${descOf(r)} · ${idLine(r)} · ${r.Holder} · ${r.Status}`,openUnit],
+ ['Tech Assignments','t',D.tech,r=>{const e=(D.equipment||[]).find(x=>x.Unit===r.Unit);return `${r.Technician} · ${descOf(e||r)} · ${idLine(e||r)}`},r=>openRow(r.Technician,r)],['Tech Replies','tr',D.tech_replies,r=>Object.values(r)[0]+' · '+(Object.values(r)[1]||''),r=>openRow(Object.values(r)[0],r)],
+ ['Certs Needed','c',D.certs_needed,r=>`${descOf(r)||r['Make / Model']} · ${idLine(r)||r['Unit ID']} · ${r.Category}`,r=>openRow(r['Unit ID'],r)]]}
 function gsearch(q){const el=document.getElementById('gres');if(!el)return;const terms=q.toLowerCase().split(/\s+/).filter(Boolean);if(!terms.length){el.innerHTML='<p class="s">Searches orders, rentals, equipment, techs, replies and certs needed.</p>';return}
  let html='',total=0;const map={};for(const [name,id,rows,lab,open] of gsets()){const hits=rows.filter(r=>{const s=(lab(r)+' '+JSON.stringify(r,(k,v)=>k.startsWith('_')||k==='lines'?undefined:v)).toLowerCase();return terms.every(w=>s.includes(w))});if(!hits.length)continue;total+=hits.length;map[id]=[hits,open];
   html+=`<h3>${esc(name)} <span class="s">(${hits.length})</span></h3>`+hits.slice(0,25).map((r,i)=>`<div class="hit" data-g="${id}" data-i="${i}">${linkOrders(lab(r))}</div>`).join('')+(hits.length>25?`<p class="s">+${hits.length-25} more - refine the search</p>`:'')}
