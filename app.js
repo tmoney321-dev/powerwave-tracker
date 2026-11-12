@@ -240,10 +240,10 @@ const myTechName=()=>{const em=String(Auth.email||'').trim().toLowerCase();retur
 let tab=(location.hash||'#myeq').slice(1);if(/=/.test(tab))tab='myeq';if(tab==='users')tab='admin';if(tab==='rentals'&&!(location.hash||'').slice(1))tab='myeq';
 function nav(){const tabs=TABS.filter(([k])=>{
   if(k==='account')return !!Auth.live;
-  if(techOnly())return k==='myeq';
+  if(techOnly())return k==='myeq'||k==='jobs';
   if(k==='admin'||k==='spend')return !!Auth.isAdmin;
   return true});
- if(techOnly()&&tab!=='myeq'&&tab!=='account')tab='myeq';
+ if(techOnly()&&tab!=='myeq'&&tab!=='account'&&tab!=='jobs')tab='myeq';
  document.body.classList.toggle('tech-only',techOnly());
  document.getElementById('tabs').innerHTML=tabs.map(([k,l])=>`<button role="tab" class="${k===tab?'on':''}" data-t="${k}">${l}</button>`).join('');
  document.querySelectorAll('#tabs button').forEach(b=>b.onclick=()=>{tab=b.dataset.t;location.hash=tab;render()})}
