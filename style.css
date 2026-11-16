@@ -143,3 +143,6 @@ tr.r-recal, .crd.r-recal{box-shadow:inset 4px 0 0 #c62828}
 .cdown.warn{background:#fff4e0;color:#b26a00}
 .soon-card.expired,.soon-card.urgent{border:1px solid #c62828}
 .soon-card.warn{border:1px solid #e0a24a}
+
+.me-status{margin-top:6px;font-weight:700;color:#b26a00}
+.me-card.at-cal{border:1px solid #e0b15a}

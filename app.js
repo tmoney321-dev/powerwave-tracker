@@ -29,7 +29,9 @@ setPersonColors(PC_SEED);
 const pCanon=n=>{const k=pKey(n);return PC_ALIAS[k]||k};
 const pColor=n=>{const k=pCanon(n);if(NOPERSON.test(k))return '';if(PC_DB[k])return PC_DB[k];if(/^(OFFICE|AT OFFICE|LEASE|DAMAGED)\b/.test(k))return '';if(PERSON_COLORS[k])return PERSON_COLORS[k];let h=0;for(const c of k)h=(h*31+c.charCodeAt(0))>>>0;return PAL[h%PAL.length]};
 const placeLabel=n=>{const s=String(n||''),k=pKey(s);if(/^AT OFFICE\b/.test(k))return s.replace(/^AT OFFICE/i,'At office');if(/^OFFICE\b/.test(k))return /^OFFICE(?:\s*\/\s*SPARE)?$/.test(k)?'At office':s.replace(/^OFFICE(?:\s*\/\s*spare)?/i,'At office');return s};
-const statusLabel=e=>{const lab=e['Status label']||'';if(/^AT OFFICE\b/i.test(lab))return lab.replace(/^AT OFFICE/i,'At office');return e.Status!=='CONFIRMED'&&lab?lab:(e.Status==='MISSING'?'Missing':e.Status==='NOT CONFIRMED'?'Not confirmed':'Confirmed')};
+const atIntellirent=e=>/^At Intellirent for cal/i.test(String(e&&e.Status||''));
+const statusTone=e=>e.Status==='MISSING'?'red':(e.Status==='NOT CONFIRMED'||atIntellirent(e))?'amber':'green';
+const statusLabel=e=>{if(atIntellirent(e))return e.Status;const lab=e['Status label']||'';if(/^AT OFFICE\b/i.test(lab))return lab.replace(/^AT OFFICE/i,'At office');return e.Status!=='CONFIRMED'&&lab?lab:(e.Status==='MISSING'?'Missing':e.Status==='NOT CONFIRMED'?'Not confirmed':'Confirmed')};
 const who=n=>{const label=placeLabel(n),c=pColor(n);return c?`<span class="who" style="--pc:${c}">${esc(label)}</span>`:esc(label||'')};
 /* Cal tag: tracker field first; else nearest Jan/May/Sep cycle from the cal date month (marked est.) */
 const TAGM={1:'JAN',2:'JAN',12:'JAN',11:'JAN',4:'MAY',5:'MAY',6:'MAY',3:'MAY',8:'SEP',9:'SEP',10:'SEP',7:'SEP'};
@@ -193,7 +195,7 @@ const assetOf=e=>{for(const v of [e&&e.Asset,e&&e.Unit,e&&e['Unit ID'],e&&e.Barc
 const serialOf=e=>{const s=String((e&&e.Serial)||'').trim();return(!s||/^n\/?a$/i.test(s))?'':s};
 const idLine=e=>{const a=assetOf(e),s=serialOf(e);return [a,s?('S/N '+s):''].filter(Boolean).join(' · ')};
 
-function openUnit(e){const d=dueInfo(e);openPanel(descOf(e)||(e.Unit+' · '+e.Model),`<p>${pill(statusLabel(e),e.Status==='MISSING'?'red':e.Status==='NOT CONFIRMED'?'amber':'green')} ${recalBadge(e)} <span class="due ${d.k}">${esc(d.t)}</span> ${leftHTML(d)} ${tagDot(e)} ${who(e.Holder)}</p>
+function openUnit(e){const d=dueInfo(e);openPanel(descOf(e)||(e.Unit+' · '+e.Model),`<p>${pill(statusLabel(e),statusTone(e))} ${recalBadge(e)} <span class="due ${d.k}">${esc(d.t)}</span> ${leftHTML(d)} ${tagDot(e)} ${who(e.Holder)}</p>
  <p class="me-ids">${esc(idLine(e)||'')}</p>
  ${e['Cert note']?`<p class="me-cert-note">${esc(e['Cert note'])}</p>`:''}
  ${kv(e,['Certs','Notes'])}${e.Notes?`<h3>Notes</h3><p class="note">${linkOrders(e.Notes)}</p>`:''}${(e.Certs||[]).length?`<h3>Cert file(s)</h3>${e.Certs.map(p=>`<span class="path">${esc(p)}</span>`).join('')}`:'<p class="s">No cert file found.</p>'}`,'unit='+encodeURIComponent(e.Unit+'|'+e.Serial))}
@@ -218,7 +220,7 @@ function openJob(j){
   return `<div class="job-ord"><div class="lt">${oLink(o.Order)} <span class="s">${esc(o.Date||'')}</span> ${who(o['Ordered by'])} ${o['On rent']?pill(o['On rent']+' on rent','green'):''}</div>
    <div class="lm">${esc(o['Ship to']||'')}</div>${items}</div>`}).join('')||'<p class="s">No orders</p>';
  const pw=j['Powerwave equipment']||[];
- const pwHtml=pw.length?`<h3>Powerwave-owned equipment on this job</h3>${pw.map(e=>`<div class="line"><div class="lt"><b>${esc(descOf(e)||e.Model||'')}</b> ${pill(statusLabel(e),e.Status==='MISSING'?'red':e.Status==='NOT CONFIRMED'?'amber':'green')}</div>
+ const pwHtml=pw.length?`<h3>Powerwave-owned equipment on this job</h3>${pw.map(e=>`<div class="line"><div class="lt"><b>${esc(descOf(e)||e.Model||'')}</b> ${pill(statusLabel(e),statusTone(e))}</div>
   <div class="lm">${[idLine(e),e.Holder&&who(e.Holder)].filter(Boolean).join(' · ')}</div></div>`).join('')}`:'';
  const html=`${kv(hdr)}
   <p class="s">No dollar amounts on this tab.</p>
@@ -329,8 +331,10 @@ const V={
     const cert=e['Cert PDF']?`<div class="me-cert">Tap to open current cal cert</div>`:`<div class="me-cert missing">Cert not on file</div>`;
     const typo=e['Cert note']?`<div class="me-cert-note">${esc(e['Cert note'])}</div>`:'';
     const dueCls=s?(s.n<=14?'over':'soon'):d.k;
-    return `<button type="button" class="me-card${needsRecal(e)?' needs-recal':''}${s?' soon-card '+s.k:''}" data-i="${i}">
+    const atCal=atIntellirent(e)?`<div class="me-status">${esc(e.Status)}</div>`:'';
+    return `<button type="button" class="me-card${needsRecal(e)?' needs-recal':''}${s?' soon-card '+s.k:''}${atIntellirent(e)?' at-cal':''}" data-i="${i}">
       <div class="me-top"><b>${esc(descOf(e)||e.Model||e.Unit||'')}</b> ${recalBadge(e)}</div>
+      ${atCal}
       <div class="me-meta">${assetOf(e)?`<span class="me-asset">${esc(assetOf(e))}</span>`:''}${serialOf(e)?`<span>S/N ${esc(serialOf(e))}</span>`:''}
         <span>Cal ${e['Cal date']?esc(fD(e['Cal date'])):'—'}</span>
         <span>Due ${noCal(e)?'—':(e['Due date']?`<span class="due ${dueCls}">${esc(fD(e['Due date']))}</span>`:'—')}</span>
@@ -354,7 +358,7 @@ const V={
   app.append(quickDue('equipment',E));app.append(legend(E.map(e=>e.Holder)));
   app.append(listView('equipment',E,{what:'description, asset, serial, holder',open:openUnit,rowClass:e=>(e.Status==='MISSING'?'r-miss ':'')+(needsRecal(e)?'r-recal ':'')+'tag-'+(TAGC[tagOf(e).t]||''),
    cols:[{k:'Description',label:'Equipment',html:e=>`<b>${esc(descOf(e))}</b>`},{k:'Asset',s:e=>assetOf(e),v:e=>assetOf(e),html:e=>assetOf(e)?esc(assetOf(e)):'—'},{k:'Serial',s:e=>serialOf(e),v:e=>serialOf(e),html:e=>serialOf(e)?esc(serialOf(e)):'—'},{k:'Holder',html:e=>who(e.Holder)},{k:'tag',label:'Tag color',s:e=>tagOf(e).t,v:e=>TAGN[tagOf(e).t]||'None',html:tagDot},{k:'Due date',label:'Cal due',s:e=>e['Due date'],v:e=>e['Due date'],html:e=>e['Due date']?`<span class="due ${e._d.k}">${fD(e['Due date'])}</span>`:''},leftCol,
-    {k:'Status',html:e=>pill(statusLabel(e),e.Status==='MISSING'?'red':e.Status==='NOT CONFIRMED'?'amber':'green')}],
+    {k:'Status',html:e=>pill(statusLabel(e),statusTone(e))}],
    filters:[{k:'Status'},{k:'Holder',v:e=>placeLabel(e.Holder)},{k:'due',label:'Cal due',v:dl},{k:'tag',label:'Tag color',v:e=>TAGN[tagOf(e).t]||'None'}],more:[{k:'Cal tag'},{k:'Model'},{k:'dw',label:'Due window',v:e=>e._d.k==='soon'?'Due in 30 days':dueWin(e._d)}]}));
  },
  tech(){head('Tech Assignments');
