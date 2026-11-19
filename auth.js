@@ -1,6 +1,6 @@
 'use strict';
-/* Auth layer: Supabase email+password, roles in public.profiles (admin/user/pending), enforced by RLS server-side.
-   Data comes from table public.site_data (row id='current'), readable only by admin/user. */
+/* Auth layer: Supabase email+password, roles in public.profiles (admin / user=Tech / software_access=Software Access / pending), enforced by RLS server-side.
+   Admins and techs read full site data via RPC public.site_data_current(). Software Access gets a scrubbed payload with no pricing. */
 const Auth=(()=>{
  const C=window.PW_CONFIG||{};const live=!!(C.SUPABASE_URL&&C.SUPABASE_ANON_KEY);
  const sb=live?window.supabase.createClient(C.SUPABASE_URL,C.SUPABASE_ANON_KEY,{auth:{persistSession:true,autoRefreshToken:true,storageKey:'pws-auth'}}):null;
@@ -45,11 +45,11 @@ const Auth=(()=>{
   try{const r=await sb.auth.getUser();if(r.data&&r.data.user)user=r.data.user}catch(e){}
   if(needsNewPassword(user))return new Promise(res=>showSetPassword(res));
   const {data:p}=await sb.from('profiles').select('role,name').eq('id',session.user.id).maybeSingle();role=p?p.role:'pending';name=p&&p.name;
-  if(role!=='admin'&&role!=='user'){lg().hidden=false;lg().innerHTML=`<div class="lbox"><h2>Waiting for approval</h2><p>Signed in as <b>${esc(email)}</b>. An admin must approve your account before you can see any data.</p><div class="row"><button id="lchk">Check again</button><button class="sec" id="lout">Sign out</button></div></div>`;
+  if(role!=='admin'&&role!=='user'&&role!=='software_access'){lg().hidden=false;lg().innerHTML=`<div class="lbox"><h2>Waiting for approval</h2><p>Signed in as <b>${esc(email)}</b>. An admin must approve your account before you can see any data.</p><div class="row"><button id="lchk">Check again</button><button class="sec" id="lout">Sign out</button></div></div>`;
    return new Promise(res=>{lg().querySelector('#lchk').onclick=()=>start().then(res);lg().querySelector('#lout').onclick=signOut})}
-  const {data,error}=await sb.from('site_data').select('data,built_at').eq('id','current').maybeSingle();
+  const {data,error}=await sb.rpc('site_data_current');
   if(error||!data){lg().hidden=false;lg().innerHTML=`<div class="lbox"><h2>No data</h2><p>${esc(error?error.message:'Nothing published yet (run publish_data.py).')}</p></div>`;return new Promise(()=>{})}
-  lg().hidden=true;return data.data}
+  lg().hidden=true;return data}
  async function signOut(){if(sb)await sb.auth.signOut();location.reload()}
  /* Admin actions go through the admin-users Edge Function (service role stays server-side; it re-checks admin role). */
  async function admin(action,body={}){const {data,error}=await sb.functions.invoke('admin-users',{body:{action,...body}});
@@ -63,7 +63,7 @@ const Auth=(()=>{
  async function saveColor(row){const {error}=await sb.from('person_colors').upsert({...row,updated_at:new Date().toISOString()});if(error)throw error}
  async function delColor(name){const {error}=await sb.from('person_colors').delete().eq('name',name);if(error)throw error}
  /* Order PDF index straight from the bucket (so new uploads show without a data rebuild); admin upload (storage RLS: admin insert/update). */
- async function pdfList(){if(!sb)return null;const out=[];for(let off=0;;off+=1000){const {data,error}=await sb.storage.from('order-pdfs').list('',{limit:1000,offset:off,sortBy:{column:'name',order:'asc'}});if(error)throw error;out.push(...data.filter(f=>f.id));if(data.length<1000)break}return out}
+ async function pdfList(){if(!sb||role!=='admin')return null;const out=[];for(let off=0;;off+=1000){const {data,error}=await sb.storage.from('order-pdfs').list('',{limit:1000,offset:off,sortBy:{column:'name',order:'asc'}});if(error)throw error;out.push(...data.filter(f=>f.id));if(data.length<1000)break}return out}
  async function pdfUpload(name,file,overwrite){const {error}=await sb.storage.from('order-pdfs').upload(name,file,{contentType:'application/pdf',upsert:!!overwrite});if(error)throw error}
  /* Admin-only rental spend (table public.admin_spend; RLS: my_role()='admin'). Never stored in site_data. */
  async function adminSpend(){

@@ -146,3 +146,5 @@ tr.r-recal, .crd.r-recal{box-shadow:inset 4px 0 0 #c62828}
 
 .me-status{margin-top:6px;font-weight:700;color:#b26a00}
 .me-card.at-cal{border:1px solid #e0b15a}
+
+.export-bar{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin:8px 0 12px}.export-bar a.sec{display:inline-flex;align-items:center;background:#e3e8ef;color:#1f3a5f;border-radius:10px;padding:9px 14px;min-height:40px;text-decoration:none}

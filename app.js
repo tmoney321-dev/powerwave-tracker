@@ -12,7 +12,11 @@ const fD=s=>{if(blank(s))return '';const d=pd(String(s));return d&&/^\d{4}-\d\d-
 const TAGC={JAN:'jan',MAY:'may',SEP:'sep'};
 const tagHTML=t=>t?`<span class="ctag ${TAGC[t]||''}">${t==='JAN'?'JAN · red':t==='MAY'?'MAY · blue':'SEP · green'}</span>`:'';
 const ORD=/\b(O[RSE]\d{6}|SRV\d{5}|RSR\d{5}|SR\d{6}|RS\d{6})\b/g;
-const oLink=no=>no?`<a href="#order=${esc(no)}" class="ord" data-o="${esc(no)}">${esc(no)}</a>`:'';
+const ROLE_LABEL={admin:'Admin',user:'Tech',software_access:'Software Access',pending:'Pending'};
+const roleLabel=r=>ROLE_LABEL[r]||r||'';
+const ROLES=['admin','user','software_access','pending'];
+const isSoftware=()=>!!(Auth.live&&Auth.role==='software_access');
+const oLink=no=>!no?'':(isSoftware()?esc(no):`<a href="#order=${esc(no)}" class="ord" data-o="${esc(no)}">${esc(no)}</a>`);
 const linkOrders=t=>esc(t).replace(ORD,m=>oLink(m));
 const typ=no=>({OR:'Rental',OE:'Exchange',OS:'Sale',SR:'Service',RS:'Service (RSR)'})[String(no).slice(0,2)]||'';
 /* Person colors: deterministic hash into a curated palette (no pure red/amber/green, which mean status). Admin overrides: edit PERSON_COLORS (UPPERCASE name -> hex). */
@@ -53,7 +57,7 @@ function rentalCalc(r){const out=pd(r['Out date']);const end=pd(r['Return/close 
  else if(r['Net daily']!=null)basis='rate known, return date unknown';
  return {days:d,spent,basis,est:r['Spend kind']!=='actual'}}
 let R=[],OI={},PDFX=null;   // PDFX: live bucket listing (order no -> [file names]) or null offline   // rentals with calc; order index
-function prep(){R=D.rentals.map((r,i)=>({...r,_i:i,_c:rentalCalc(r)}));OI={};
+function prep(){R=(D.rentals||[]).map((r,i)=>({...r,_i:i,_c:rentalCalc(r)}));OI={};
  const get=no=>OI[no]||(OI[no]={no,o:null,lines:[]});
  (D.orders||[]).forEach(o=>get(o.Order).o=o);R.forEach(r=>get(r.Order).lines.push(r));
  Object.values(OI).forEach(x=>{const o=x.o||{},L=x.lines;const f=k=>L.map(r=>r[k]).find(v=>!blank(v)&&v!=='(unknown)');
@@ -102,6 +106,82 @@ function listView(key,rows,cfg){
 function csv(name,rows,cols){const q=v=>{v=v==null?'':Array.isArray(v)?v.join(' | '):String(v);return /[",\n]/.test(v)?'"'+v.replace(/"/g,'""')+'"':v};
  const t=[cols.map(c=>q(c.label||c.k)).join(','),...rows.map(r=>cols.map(c=>q(c.v?c.v(r):r[c.k])).join(','))].join('\n');
  const a=document.createElement('a');a.href=URL.createObjectURL(new Blob([t],{type:'text/csv'}));a.download=`powerwave_${name}_${new Date().toISOString().slice(0,10)}.csv`;a.click()}
+const canExportData=()=>!!(Auth.isAdmin||isSoftware());
+const isoDate=s=>{const d=pd(s);return d?d.toISOString().slice(0,10):'';};
+const csvPlain=s=>{s=s==null?'':Array.isArray(s)?s.join(' | '):String(s);s=s.replace(/[\u2010-\u2015\u2212]/g,'-').replace(/\u00a0/g,' ');s=s.replace(/\$\s?\d[\d,]*(?:\.\d+)?/g,'[redacted]');return s.trim();};
+const csvCell=v=>{v=csvPlain(v);return /[",\n\r]/.test(v)?'"'+v.replace(/"/g,'""')+'"':v};
+const downloadCsv=(name,headers,rows)=>{
+  const body=[headers.join(','),...rows.map(r=>headers.map(h=>csvCell(r[h])).join(','))].join('\r\n')+'\r\n';
+  const a=document.createElement('a');a.href=URL.createObjectURL(new Blob(['\ufeff'+body],{type:'text/csv;charset=utf-8'}));a.download=name;a.click();
+};
+const splitUnitIds=e=>{
+  const unit=String(e.Unit||e['Unit ID']||'').trim();
+  const asset=String(e.Asset||'').trim();
+  const pws=[unit,asset].map(v=>(String(v).match(/^(PWS\d+)/i)||[])[1]).find(Boolean);
+  const rental=[unit,asset].map(v=>(String(v).match(/^(R\d+|I\d+)/i)||[])[1]).find(Boolean);
+  return {unit,pws_id:pws?pws.toUpperCase():'',rental_no:rental?rental.toUpperCase():''};
+};
+const noCalRequired=e=>{
+  if(noCal(e))return 'Yes';
+  const t=[e.Model,e.Description,e['Make / Model'],e['Item / note']].filter(Boolean).join(' ');
+  return (/TR-3170/i.test(t)||/SG Ultra Max/i.test(t))?'Yes':'No';
+};
+const confirmedVal=e=>{
+  const st=String(e.Status||'');
+  if(st==='MISSING'||st==='NOT CONFIRMED')return 'No';
+  if(st==='CONFIRMED'||/^At Intellirent for cal/i.test(st))return 'Yes';
+  const blob=String(e['Status label']||e.Confirmation||'');
+  if(/^CONFIRMED/i.test(blob))return 'Yes';
+  if(/NOT CONFIRMED|MISSING/i.test(blob))return 'No';
+  return '';
+};
+function dataExportBar(onCsv){
+  if(!canExportData())return;
+  const bar=document.createElement('div');
+  bar.className='export-bar';
+  bar.innerHTML='<button type="button" class="sec" id="ex_csv">Export CSV</button> <a class="sec" href="jose_axis_data_spec.md" download="jose_axis_data_spec.md">Data spec</a>';
+  bar.querySelector('#ex_csv').onclick=onCsv;
+  app.append(bar);
+}
+function exportEquipmentCsv(){
+  const headers=['pws_id','rental_no','unit','description','make_model','serial','holder','status','confirmed','cal_date','cal_due','cert_number','cal_vendor','has_cert','cert_path','airtag','notes','cal_tag','confirmation','intellirent_facility','intellirent_last_order','no_cal_required'];
+  const rows=(D.equipment||[]).map(e=>{
+    const ids=splitUnitIds(e);
+    const cert=String(e['Cert PDF']||'').trim();
+    return {
+      pws_id:ids.pws_id,rental_no:ids.rental_no,unit:ids.unit,
+      description:e.Description||'',make_model:e.Model||'',serial:e.Serial||'',
+      holder:e.Holder||'',status:e.Status||'',confirmed:confirmedVal(e),
+      cal_date:isoDate(e['Cal date']),cal_due:isoDate(e['Due date']),
+      cert_number:'',cal_vendor:'',
+      has_cert:cert?'Yes':'No',cert_path:cert,airtag:e.AirTag||'',notes:e.Notes||'',
+      cal_tag:e['Cal tag']||'',confirmation:e.Confirmation||e['Status label']||'',
+      intellirent_facility:e['Intellirent facility']||'',
+      intellirent_last_order:e['Intellirent last order']||'',
+      no_cal_required:noCalRequired(e)
+    };
+  });
+  downloadCsv('powerwave_equipment_'+new Date().toISOString().slice(0,10)+'.csv',headers,rows);
+}
+function exportCertsNeededCsv(){
+  const byUnit={};(D.equipment||[]).forEach(e=>{if(e.Unit)byUnit[e.Unit]=e});
+  const headers=['unit_id','pws_id','rental_no','description','make_model','serial','who_has_it','category','tracker_cal','tracker_due','what_is_needed','has_cert','cert_path'];
+  const rows=(D.certs_needed||[]).map(e=>{
+    const ids=splitUnitIds(e);
+    const eq=byUnit[e['Unit ID']||'']||byUnit[e.Asset||'']||null;
+    const cert=String((eq&&eq['Cert PDF'])||e['Cert PDF']||'').trim();
+    return {
+      unit_id:e['Unit ID']||ids.unit,pws_id:ids.pws_id,rental_no:ids.rental_no,
+      description:e.Description||'',make_model:e['Make / Model']||e.Model||'',
+      serial:e.Serial||'',who_has_it:e['Who has it']||'',
+      category:String(e.Category||'').replace(/^\d+\.\s*/,''),
+      tracker_cal:isoDate(e['Tracker cal']||e['Tracker Cal']),
+      tracker_due:isoDate(e['Tracker due (10-14, newer)']||e['Tracker due']||e['Tracker Due']),
+      what_is_needed:e['What is needed']||'',has_cert:cert?'Yes':'No',cert_path:cert
+    };
+  });
+  downloadCsv('powerwave_certs_needed_'+new Date().toISOString().slice(0,10)+'.csv',headers,rows);
+}
 const fold=(title,el,open)=>{const d=document.createElement('details');d.className='fold';d.open=!!open;d.innerHTML=`<summary>${esc(title)}</summary>`;d.append(el);return d};
 const sortedUnique=a=>[...new Set((a||[]).filter(Boolean))].sort(Combo.numCmp);
 
@@ -120,7 +200,7 @@ function closePanel(){const p=document.getElementById('panel');if(p.hidden)retur
 document.addEventListener('keydown',e=>{if(e.key==='Escape')closePanel()});
 document.addEventListener('click',e=>{const a=e.target.closest('a.ord');if(a){e.preventDefault();e.stopPropagation();openOrder(a.dataset.o)}});
 
-function openOrder(no){no=String(no||'').toUpperCase();const x=OI[no];if(!x){toast('No data for '+no);return}
+function openOrder(no){if(isSoftware()){toast('Order details are not available for Software Access.');return}no=String(no||'').toUpperCase();const x=OI[no];if(!x){toast('No data for '+no);return}
  const o=x.o||{},L=x.lines,adm=!!Auth.isAdmin;
  const hdr={'Order':no,'Type':x.type,'Status':x.status,'Order date':o['Order date']||x.date,'Ship date':o['Ship date']||L.map(r=>r['Out date']).filter(Boolean).sort()[0],
   'Returned':L.some(isOn)?(L.some(r=>!isOn(r)&&r['Return/close date'])?'partly - '+L.filter(isOn).length+' item(s) still on rent':''):L.map(r=>r['Return/close date']).filter(Boolean).sort().slice(-1)[0],'Billed through':L.map(r=>r['Billed through']).filter(Boolean).sort().slice(-1)[0],
@@ -187,7 +267,7 @@ async function renderOrderPdf(el){
   el.innerHTML=`<p class="s">${/not found|404|Object not found/i.test(msg)?'No PDF on file for this order.':('Could not load PDF: '+esc(msg))}</p>`;
  }
 }
-function openRental(r){const c=r._c;openPanel(r.Item,`<p>${stPill(r)} ${oLink(r.Order)}</p>
+function openRental(r){if(isSoftware()){toast('Rental details are not available for Software Access.');return}const c=r._c;openPanel(r.Item,`<p>${stPill(r)} ${oLink(r.Order)}</p>
  <div class="tots"><div><b>${c.spent!=null?usd2(c.spent):'?'}</b><span>${c.spent==null?'price unknown':c.est?'estimate':'actual invoiced'}</span></div><div><b>${c.days??''}</b><span>days</span></div></div>
  ${kv({...r,'Days out':c.days},['Item','Status','Order','Who (ordered by)','Where (ship to / job)'])}<p class="s">${esc(c.basis||'')}</p>`,'rental='+r._i)}
 const descOf=e=>(e&&(e.Description||e.Model||e.Item||e['Make / Model']||'')).trim();
@@ -228,9 +308,9 @@ function openJob(j){
  openPanel(name==='Unassigned'?'Unassigned orders':('Job · '+name),html,'job='+encodeURIComponent(name));
 }
 function fromHash(){const h=decodeURIComponent(location.hash.slice(1));let m;
- if((m=/^order=(.+)$/.exec(h)))return openOrder(m[1]),true;
+ if((m=/^order=(.+)$/.exec(h))){if(isSoftware())return true;return openOrder(m[1]),true;}
  if((m=/^job=(.+)$/.exec(h))){const name=m[1];const jb=(D.job_board&&D.job_board.jobs||[]).find(j=>j.Job===name);if(jb){if(tab!=='jobs'){tab='jobs';render()}return openJob(jb),true}toast('Job not found');return true}
- if((m=/^rental=(\d+)$/.exec(h))&&R[+m[1]])return openRental(R[+m[1]]),true;
+ if((m=/^rental=(\d+)$/.exec(h))&&R[+m[1]]){if(isSoftware())return true;return openRental(R[+m[1]]),true;}
  if((m=/^unit=(.*)\|(.*)$/.exec(h))){const e=D.equipment.find(e=>e.Unit===m[1]&&e.Serial===m[2]);if(e)return openUnit(e),true}
  return false}
 
@@ -243,10 +323,12 @@ let tab=(location.hash||'#myeq').slice(1);if(/=/.test(tab))tab='myeq';if(tab==='
 function nav(){const tabs=TABS.filter(([k])=>{
   if(k==='account')return !!Auth.live;
   if(techOnly())return k==='myeq'||k==='jobs';
+  if(isSoftware())return k==='myeq'||k==='equipment'||k==='tech'||k==='certsneeded'||k==='jobs'||k==='search';
   if(k==='admin'||k==='spend')return !!Auth.isAdmin;
   return true});
  if(tab==='duesoon')tab='myeq';
  if(techOnly()&&tab!=='myeq'&&tab!=='account'&&tab!=='jobs')tab='myeq';
+ if(isSoftware()&&!(['myeq','equipment','tech','certsneeded','jobs','search','account'].includes(tab)))tab='myeq';
  document.body.classList.toggle('tech-only',techOnly());
  document.getElementById('tabs').innerHTML=tabs.map(([k,l])=>`<button role="tab" class="${k===tab?'on':''}" data-t="${k}">${l}</button>`).join('');
  document.querySelectorAll('#tabs button').forEach(b=>b.onclick=()=>{tab=b.dataset.t;location.hash=tab;render()})}
@@ -354,6 +436,7 @@ const V={
  equipment(){head('Equipment');
   const E=D.equipment.map(e=>({...e,_d:dueInfo(e)}));const c=f=>E.filter(f).length;
   kpis([[E.length,'units'],[c(e=>e.Status==='MISSING'),'missing',1],[c(e=>e.Status==='NOT CONFIRMED'),'assigned, not confirmed',1],[c(e=>e._d.k==='over'||e._d.k==='recal'),'cal overdue',1],[c(e=>e._d.k==='soon'),'due within 30 days'],[c(needsRecal),'needs recal',c(needsRecal)]]);
+  dataExportBar(exportEquipmentCsv);
   const dl=e=>({over:'Overdue',soon:'Due soon',ok:'OK',nodate:'No date',nocal:'No cal required',recal:'Needs recal'})[e._d.k];
   app.append(quickDue('equipment',E));app.append(legend(E.map(e=>e.Holder)));
   app.append(listView('equipment',E,{what:'description, asset, serial, holder',open:openUnit,rowClass:e=>(e.Status==='MISSING'?'r-miss ':'')+(needsRecal(e)?'r-recal ':'')+'tag-'+(TAGC[tagOf(e).t]||''),
@@ -374,6 +457,7 @@ const V={
   if(D.roster.length)app.append(fold('Employee roster',listView('roster',D.roster,{what:'employees',cols:[{k:'Employee'}]})));
  },
  certsneeded(){head('Certs Needed');
+  dataExportBar(exportCertsNeededCsv);
   app.append(listView('cn',D.certs_needed,{what:'description, asset, serial',open:r=>openRow((descOf(r)||r['Unit ID']||'')+' · '+(idLine(r)||''),r),
    rowClass:r=>/EXPIRED/i.test(r.Category)?'r-miss':/DONE/i.test(r.Category)?'r-ok':'',
    cols:[{k:'Description',label:'Equipment',html:r=>`<b>${esc(descOf(r)||r['Make / Model']||'')}</b>`},{k:'Asset',s:r=>assetOf(r),v:r=>assetOf(r),html:r=>assetOf(r)?esc(assetOf(r)):(r['Unit ID']||'—')},{k:'Serial',s:r=>serialOf(r),v:r=>serialOf(r),html:r=>serialOf(r)?esc(serialOf(r)):'—'},{k:'Category',label:'Status',v:r=>String(r.Category||'').replace(/^\d+\.\s*/,'')}],
@@ -394,7 +478,7 @@ const V={
    filters:[{k:'Order Status',label:'Status'},{k:'Ordered By',label:'Who'}]}));
  },
  search(){head('Global Search');const q=document.getElementById('gq').value.trim();
-  const box=document.createElement('div');box.innerHTML=`<div class="bar"><input type="search" id="gs" placeholder="Type anything: unit, serial, tech, order #, model…" value="${esc(q)}"></div><div id="gres"></div>`;app.append(box);
+  const box=document.createElement('div');box.innerHTML=`<div class="bar"><input type="search" id="gs" placeholder="${isSoftware()?'Unit, serial, tech, or model…':'Type anything: unit, serial, tech, order #, model…'}" value="${esc(q)}"></div><div id="gres"></div>`;app.append(box);
   const inp=box.querySelector('#gs');inp.oninput=()=>{document.getElementById('gq').value=inp.value;gsearch(inp.value)};gsearch(q);inp.focus();
  },
 
@@ -525,7 +609,7 @@ const V={
   b.querySelectorAll('button').forEach(x=>x.onclick=()=>{state.adminSub=x.dataset.s;render()});app.append(b);
   if(!Auth.live&&cur!=='data')app.insertAdjacentHTML('beforeend','<p class="warn">Offline / local copy: this admin feature needs the live site (Supabase backend). Shown read-only.</p>');
   const box=document.createElement('div');box.className='admbox';app.append(box);A[cur](box)},
- account(){head('Account');app.insertAdjacentHTML('beforeend',`<p>Signed in as <b>${esc(Auth.email)}</b> · role <b>${esc(Auth.role)}</b></p><div class="row">${pwField('mypw','New password (10+)')}<button class="sec" id="cpw">Change my password</button><button class="sec" id="sout">Sign out</button></div>`);
+ account(){head('Account');app.insertAdjacentHTML('beforeend',`<p>Signed in as <b>${esc(Auth.email)}</b> · role <b>${esc(roleLabel(Auth.role))}</b></p><div class="row">${pwField('mypw','New password (10+)')}<button class="sec" id="cpw">Change my password</button><button class="sec" id="sout">Sign out</button></div>`);
   bindPw(app);document.getElementById('sout').onclick=Auth.signOut;document.getElementById('cpw').onclick=async()=>{try{await Auth.changePw(document.getElementById('mypw').value);toast('Password changed')}catch(e){toast(e.message)}}}
 };
 const pwField=(id,ph)=>`<span class="pwf"><input id="${id}" type="password" placeholder="${ph}" minlength="10" autocomplete="new-password"><button type="button" class="sec sm pwt" data-for="${id}" aria-label="Show password">Show</button></span>`;
@@ -540,15 +624,15 @@ function peopleSeen(){const c={};const add=n=>{if(blank(n))return;const k=pKey(n
 const A={
  async users(box){
   box.innerHTML=`<h2>Add user</h2><div class="bar"><input id="nu_e" type="email" placeholder="Email" autocomplete="off"><input id="nu_n" placeholder="Name (optional)">
-   ${pwField('nu_p','Password (10+ chars)')}<label class="fl"><span>Role</span><select id="nu_r" data-plain><option>user</option><option>admin</option><option>pending</option></select></label><button id="nu_go">Add user</button></div>
-   <p class="s">Roles: <b>admin</b> = data + Admin tab, <b>user</b> = data only, <b>pending</b> = no access (use to revoke). Admin-added users are pre-confirmed and sign in with the password you set. Disabled users cannot sign in.</p><h2>Users</h2><div id="ul">Loading…</div>`;
+   ${pwField('nu_p','Password (10+ chars)')}<label class="fl"><span>Role</span><select id="nu_r" data-plain>${ROLES.map(r=>`<option value="${r}">${roleLabel(r)}</option>`).join('')}</select></label><button id="nu_go">Add user</button></div>
+   <p class="s">Roles: <b>Admin</b> = all data, Rental Spend, Admin tab, order PDFs and certs. <b>Tech</b> = My Equipment (their gear) and Jobs, no dollars. <b>Software Access</b> = all equipment, certs, tech assignments, Jobs and equipment search; no rental spend, order PDFs or prices. <b>Pending</b> = no access (use to revoke). Admin-added users are pre-confirmed and sign in with the password you set. Disabled users cannot sign in.</p><h2>Users</h2><div id="ul">Loading…</div>`;
   bindPw(box);
   box.querySelector('#nu_go').onclick=()=>act('create',{email:box.querySelector('#nu_e').value.trim(),name:box.querySelector('#nu_n').value.trim(),password:box.querySelector('#nu_p').value,role:box.querySelector('#nu_r').value},'User added');
   if(!Auth.live){box.querySelector('#ul').textContent='(no backend - open the live site)';box.querySelectorAll('input,button,select').forEach(e=>e.disabled=true);return}
   try{const {users}=await Auth.admin('list');const me=Auth.email;
    box.querySelector('#ul').innerHTML=`<div class="tw"><table class="utab"><thead><tr><th>Name / email</th><th>Role</th><th>Last sign-in</th><th>Password</th><th></th></tr></thead><tbody>${users.map(p=>{const dis=p.banned_until&&new Date(p.banned_until)>new Date();const self=p.email===me;
     return `<tr class="ucard" data-uid="${p.id}" data-em="${esc(p.email)}"><td data-l="User"><b>${esc(p.name||'—')}</b> ${p.role==='pending'?'<span class="pill amber">NEEDS APPROVAL</span>':''}${dis?'<span class="pill red">DISABLED</span>':''}${self?'<span class="pill green">you</span>':''}<div class="s">${esc(p.email)}</div></td>
-     <td data-l="Role"><select data-plain class="u_role" ${self?'disabled title="You cannot change your own role"':''}>${['admin','user','pending'].map(r=>`<option ${r===p.role?'selected':''}>${r}</option>`).join('')}</select></td>
+     <td data-l="Role"><select data-plain class="u_role" ${self?'disabled title="You cannot change your own role"':''}>${ROLES.map(r=>`<option value="${r}" ${r===p.role?'selected':''}>${roleLabel(r)}</option>`).join('')}</select></td>
      <td data-l="Last sign-in" class="s">${p.last_sign_in_at?fmtT(p.last_sign_in_at):'never'}</td>
      <td data-l="Password"><span class="row">${pwField('pw_'+p.id,'New password (10+)')}<button class="sec sm u_pw">Set</button></span></td>
      <td>${self?'':`<span class="row"><button class="sec sm u_dis">${dis?'Enable':'Disable'}</button><button class="sec sm danger u_del">Delete</button></span>`}</td></tr>`}).join('')}</tbody></table></div>`;
@@ -598,18 +682,19 @@ const A={
     try{await Auth.pdfUpload(n,f,ov);ok++;line(`✓ ${n} uploaded`)}catch(e){line(`✗ ${n}: ${/exists|Duplicate/i.test(e.message)?'already exists (choose Overwrite)':e.message}`)}}
    if(ok){await loadPdfIndex();prep();toast(ok+' PDF(s) uploaded');const keep=log.innerHTML;render();const l2=document.getElementById('plog');if(l2)l2.innerHTML=keep}}}
 };
-async function loadPdfIndex(){if(!Auth.live)return;try{const L=await Auth.pdfList();PDFX={};L.forEach(f=>{const m=/^(O[RSE]\d{6}|SRV\d{5}|RSR\d{5}|SR\d{6}|RS\d{6})/.exec(f.name);if(m)(PDFX[m[1]]=PDFX[m[1]]||[]).push(f.name)})}catch(e){PDFX=null}}
+async function loadPdfIndex(){if(!Auth.live||!Auth.isAdmin)return;try{const L=await Auth.pdfList();if(!L){PDFX=null;return}PDFX={};L.forEach(f=>{const m=/^(O[RSE]\d{6}|SRV\d{5}|RSR\d{5}|SR\d{6}|RS\d{6})/.exec(f.name);if(m)(PDFX[m[1]]=PDFX[m[1]]||[]).push(f.name)})}catch(e){PDFX=null}}
 function toast(t){const d=document.createElement('div');d.className='toast';d.textContent=t;document.body.append(d);setTimeout(()=>d.remove(),2500)}
 function sourcesEl(){const d=document.createElement('div');
  d.innerHTML=`<h3>Sources</h3>${(D.sources||[]).map(s=>`<div class="line"><b>${esc(s.Source)}</b><div class="lm">${esc(fmtT(s.dropbox_modified||s.file_modified||s.fetched||''))}${s.present===false?' · not present':''}</div></div>`).join('')}
   <h3>Data gaps (${D.gaps.length})</h3>${D.gaps.map(g=>`<p class="s">${linkOrders(g)}</p>`).join('')}`;return d}
 
 /* ---------- global search ---------- */
-function gsets(){return [['Orders','o',Object.values(OI),x=>`${x.no} · ${x.type} · ${x.who} · ${x.where} · ${x.status}`,x=>openOrder(x.no)],
+function gsets(){const all=[['Orders','o',Object.values(OI),x=>`${x.no} · ${x.type} · ${x.who} · ${x.where} · ${x.status}`,x=>openOrder(x.no)],
  ['Live Rentals','r',R,r=>`${r.Description||r.Item} · ${idLine(r)} · ${r.Order} · ${isOn(r)?'On rent':'Returned'}`,openRental],['Equipment','e',D.equipment,r=>`${descOf(r)} · ${idLine(r)} · ${r.Holder} · ${r.Status}`,openUnit],
  ['Tech Assignments','t',D.tech,r=>{const e=(D.equipment||[]).find(x=>x.Unit===r.Unit);return `${r.Technician} · ${descOf(e||r)} · ${idLine(e||r)}`},r=>openRow(r.Technician,r)],['Tech Replies','tr',D.tech_replies,r=>Object.values(r)[0]+' · '+(Object.values(r)[1]||''),r=>openRow(Object.values(r)[0],r)],
- ['Certs Needed','c',D.certs_needed,r=>`${descOf(r)||r['Make / Model']} · ${idLine(r)||r['Unit ID']} · ${r.Category}`,r=>openRow(r['Unit ID'],r)]]}
-function gsearch(q){const el=document.getElementById('gres');if(!el)return;const terms=q.toLowerCase().split(/\s+/).filter(Boolean);if(!terms.length){el.innerHTML='<p class="s">Searches orders, rentals, equipment, techs, replies and certs needed.</p>';return}
+ ['Certs Needed','c',D.certs_needed,r=>`${descOf(r)||r['Make / Model']} · ${idLine(r)||r['Unit ID']} · ${r.Category}`,r=>openRow(r['Unit ID'],r)]];
+ return isSoftware()?all.filter(x=>x[1]==='e'||x[1]==='t'||x[1]==='tr'||x[1]==='c'):all}
+function gsearch(q){const el=document.getElementById('gres');if(!el)return;const terms=q.toLowerCase().split(/\s+/).filter(Boolean);if(!terms.length){el.innerHTML=isSoftware()?'<p class="s">Searches equipment, certs needed, tech assignments and replies.</p>':'<p class="s">Searches orders, rentals, equipment, techs, replies and certs needed.</p>';return}
  let html='',total=0;const map={};for(const [name,id,rows,lab,open] of gsets()){const hits=rows.filter(r=>{const s=(lab(r)+' '+JSON.stringify(r,(k,v)=>k.startsWith('_')||k==='lines'?undefined:v)).toLowerCase();return terms.every(w=>s.includes(w))});if(!hits.length)continue;total+=hits.length;map[id]=[hits,open];
   html+=`<h3>${esc(name)} <span class="s">(${hits.length})</span></h3>`+hits.slice(0,25).map((r,i)=>`<div class="hit" data-g="${id}" data-i="${i}">${linkOrders(lab(r))}</div>`).join('')+(hits.length>25?`<p class="s">+${hits.length-25} more - refine the search</p>`:'')}
  el.innerHTML=total?html:'<p>No matches.</p>';
