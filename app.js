@@ -326,7 +326,6 @@ function openJob(j){
  const pwHtml=pw.length?`<h3>Powerwave-owned equipment on this job</h3>${pw.map(e=>`<div class="line"><div class="lt"><b>${esc(descOf(e)||e.Model||'')}</b> ${pill(statusLabel(e),statusTone(e))}</div>
   <div class="lm">${[idLine(e),e.Holder&&who(e.Holder)].filter(Boolean).join(' · ')}</div></div>`).join('')}`:'';
  const html=`${kv(hdr)}
-  <p class="s">No dollar amounts on this tab.</p>
   <h3>Orders (${orders.length})</h3>${ordHtml}${pwHtml}`;
  openPanel(name==='Unassigned'?'Unassigned orders':('Job · '+name),html,'job='+encodeURIComponent(name));
 }
@@ -558,7 +557,7 @@ const V={
   top.innerHTML=[['jobs',c.jobs||0],['active (on rent)',c.active_jobs||0],['rental orders',c.orders||0],['unassigned orders',c.unassigned_orders||0]]
    .map(([l,v])=>`<div class="kpi"><b>${v}</b><span>${l}</span></div>`).join('');
   app.append(top);
-  app.insertAdjacentHTML('beforeend',`<p class="s">No dollar amounts. Unmatched rentals show under Unassigned.</p>`);
+  app.insertAdjacentHTML('beforeend',`<p class="s">Unmatched rentals show under Unassigned.</p>`);
   const yr=state.jobsYear||'all';
   const years=[...new Set(all.flatMap(j=>j.Years||[]))].sort((a,b)=>b-a);
   const filt=document.createElement('div');filt.className='qf';
@@ -692,7 +691,7 @@ const A={
  async users(box){
   box.innerHTML=`<h2>Add user</h2><div class="bar"><input id="nu_e" type="email" placeholder="Email" autocomplete="off"><input id="nu_n" placeholder="Name (optional)">
    ${pwField('nu_p','Password (10+ chars)')}<label class="fl"><span>Role</span><select id="nu_r" data-plain>${ROLES.map(r=>`<option value="${r}">${roleLabel(r)}</option>`).join('')}</select></label><button id="nu_go">Add user</button></div>
-   <p class="s">Roles: <b>Admin</b> = all data, Rental Spend, Admin tab, order PDFs and certs. <b>Tech</b> = My Equipment (their gear) and Jobs, no dollars. <b>Software Access</b> = all equipment, certs, tech assignments, Jobs and equipment search; no rental spend, order PDFs or prices. <b>Pending</b> = no access (use to revoke). Admin-added users are pre-confirmed and sign in with the password you set. Disabled users cannot sign in.</p><h2>Users</h2><div id="ul">Loading…</div>`;
+   <p class="s">Roles: <b>Admin</b> = all data, Rental Spend, Admin tab, order PDFs and certs. <b>Tech</b> = My Equipment (their gear) and Jobs. <b>Software Access</b> = all equipment, certs, tech assignments, Jobs and equipment search. <b>Pending</b> = no access (use to revoke). Admin-added users are pre-confirmed and sign in with the password you set. Disabled users cannot sign in.</p><h2>Users</h2><div id="ul">Loading…</div>`;
   bindPw(box);
   box.querySelector('#nu_go').onclick=()=>act('create',{email:box.querySelector('#nu_e').value.trim(),name:box.querySelector('#nu_n').value.trim(),password:box.querySelector('#nu_p').value,role:box.querySelector('#nu_r').value},'User added');
   if(!Auth.live){box.querySelector('#ul').textContent='(no backend - open the live site)';box.querySelectorAll('input,button,select').forEach(e=>e.disabled=true);return}
