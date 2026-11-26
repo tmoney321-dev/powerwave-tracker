@@ -383,9 +383,15 @@ const V={
  myeq(){head('My Equipment');
   const people=(D.people_equipment||[]).map(p=>({...p,units:(p.units||[]).map(e=>({...e,_d:dueInfo(e)}))}));
   const mine=myTechName();
+  const isTrailer=p=>!!(p.location&&p.name==='Job Trailer');
+  // Signed-in techs (and admins like Kyle) get a personal section even with 0 confirmed units.
+  if(mine&&!people.some(p=>p.name===mine&&!p.location)){
+    people.push({name:mine,location:false,units:[]});
+  }
   let visible;
   if(techOnly()){
-    visible=people.filter(p=>p.name===mine&&!p.location);
+    // Own gear plus the Job Trailer location. Never Office, never other techs.
+    visible=people.filter(p=>(p.name===mine&&!p.location)||isTrailer(p));
     if(!visible.length){
       app.insertAdjacentHTML('beforeend', mine
         ? `<p>No confirmed equipment is assigned to <b>${esc(mine)}</b> right now.</p>`
@@ -395,15 +401,22 @@ const V={
   }else{
     visible=people;
     if(!visible.length){app.insertAdjacentHTML('beforeend','<p>No confirmed equipment is assigned to anyone right now.</p>');return}
-    const st=state.myeq||(state.myeq={person:mine&&visible.some(p=>p.name===mine)?mine:visible[0].name});
-    if(!visible.some(p=>p.name===st.person))st.person=visible[0].name;
+  }
+  const defaultPerson=mine&&visible.some(p=>p.name===mine)?mine:visible[0].name;
+  const st=state.myeq||(state.myeq={person:defaultPerson});
+  if(!visible.some(p=>p.name===st.person))st.person=defaultPerson;
+  if(visible.length>1){
     const sw=document.createElement('div');sw.className='me-people';
     sw.innerHTML=visible.map(p=>`<button type="button" class="${p.name===st.person?'on':''}" data-p="${esc(p.name)}">${esc(p.name)} <small>${p.units.length}</small></button>`).join('');
     sw.querySelectorAll('button').forEach(b=>b.onclick=()=>{state.myeq.person=b.dataset.p;render()});
     app.append(sw);
-    visible=visible.filter(p=>p.name===st.person);
   }
+  visible=visible.filter(p=>p.name===st.person);
   const p=visible[0];
+  if(!p.units.length){
+    app.insertAdjacentHTML('beforeend', `<p>No confirmed equipment is assigned to <b>${esc(p.name)}</b> right now.</p>`);
+    return;
+  }
   p.units=[...p.units].sort((a,b)=>(a._d.n??9e9)-(b._d.n??9e9));
   const n=p.units.length, missing=p.units.filter(e=>!e['Cert PDF']).length, recals=p.units.filter(needsRecal).length;
   kpis([[n,'confirmed unit'+(n===1?'':'s'),false],[missing,'cert not on file',!!missing],[recals,'needs recal',!!recals]]);
