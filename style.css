@@ -117,7 +117,7 @@ dl.kv{display:grid;grid-template-columns:minmax(110px,34%) 1fr;gap:4px 12px;back
 .me-people button{border:1px solid #c9d3de;background:#fff;color:#1b1f24;border-radius:20px;padding:6px 12px;font-weight:600}
 .me-people button.on{background:#1f3a5f;color:#fff;border-color:#1f3a5f}
 .me-list{display:flex;flex-direction:column;gap:10px}
-.me-card{background:#fff;border-radius:12px;padding:12px 14px;box-shadow:0 1px 3px #0002;cursor:pointer;text-align:left;border:0;width:100%}
+.me-card{background:#fff;color:#1b1f24;border-radius:12px;padding:12px 14px;box-shadow:0 1px 3px #0002;cursor:pointer;text-align:left;border:0;width:100%}
 .me-card:focus{outline:2px solid #1f3a5f;outline-offset:2px}
 .me-card .me-top{display:flex;flex-wrap:wrap;gap:6px 12px;align-items:baseline}
 .me-card .me-top b{font-size:1.05em}
@@ -146,5 +146,13 @@ tr.r-recal, .crd.r-recal{box-shadow:inset 4px 0 0 #c62828}
 
 .me-status{margin-top:6px;font-weight:700;color:#b26a00}
 .me-card.at-cal{border:1px solid #e0b15a}
+
+.me-card.unconfirmed{background:#f3f5f7;color:#1b1f24;cursor:default;border:1px solid #d8dde4}
+.me-card.unconfirmed .me-top b{color:#5a6573}
+.me-actions{display:flex;flex-wrap:wrap;gap:8px;margin-top:10px}
+.me-actions button{font-size:13px;min-height:36px}
+.me-unc{display:inline-block;margin-left:6px;background:#fff4e0;color:#b26a00;border-radius:10px;padding:1px 7px;font-size:11px;font-weight:700;vertical-align:middle}
+.me-people button.on .me-unc{background:#fff;color:#8a4b00}
+.me-site-note{margin-top:6px;font-size:12px;color:#5a6573}
 
 .export-bar{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin:8px 0 12px}.export-bar a.sec{display:inline-flex;align-items:center;background:#e3e8ef;color:#1f3a5f;border-radius:10px;padding:9px 14px;min-height:40px;text-decoration:none}

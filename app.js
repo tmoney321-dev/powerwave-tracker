@@ -34,8 +34,31 @@ const pCanon=n=>{const k=pKey(n);return PC_ALIAS[k]||k};
 const pColor=n=>{const k=pCanon(n);if(NOPERSON.test(k))return '';if(PC_DB[k])return PC_DB[k];if(/^(OFFICE|AT OFFICE|LEASE|DAMAGED)\b/.test(k))return '';if(PERSON_COLORS[k])return PERSON_COLORS[k];let h=0;for(const c of k)h=(h*31+c.charCodeAt(0))>>>0;return PAL[h%PAL.length]};
 const placeLabel=n=>{const s=String(n||''),k=pKey(s);if(/^AT OFFICE\b/.test(k))return s.replace(/^AT OFFICE/i,'At office');if(/^OFFICE\b/.test(k))return /^OFFICE(?:\s*\/\s*SPARE)?$/.test(k)?'At office':s.replace(/^OFFICE(?:\s*\/\s*spare)?/i,'At office');return s};
 const atIntellirent=e=>/^At Intellirent for cal/i.test(String(e&&e.Status||''));
-const statusTone=e=>e.Status==='MISSING'?'red':(e.Status==='NOT CONFIRMED'||atIntellirent(e))?'amber':'green';
-const statusLabel=e=>{if(atIntellirent(e))return e.Status;const lab=e['Status label']||'';if(/^AT OFFICE\b/i.test(lab))return lab.replace(/^AT OFFICE/i,'At office');return e.Status!=='CONFIRMED'&&lab?lab:(e.Status==='MISSING'?'Missing':e.Status==='NOT CONFIRMED'?'Not confirmed':'Confirmed')};
+let SITE_CONF={};
+const eqKey=e=>`${(e&&e.Unit)||''}|${(e&&e.Serial)||''}`;
+const confOf=e=>SITE_CONF[eqKey(e)]||null;
+const siteConfirmed=e=>(confOf(e)||{}).status==='confirmed';
+const markedNotMine=e=>(confOf(e)||{}).status==='not_mine';
+const awaitingConfirm=e=>!!(e&&e._unconfirmed)&&!siteConfirmed(e)&&!markedNotMine(e);
+async function refreshConfirmations(){
+  SITE_CONF={};
+  if(!Auth.live||!Auth.listConfirmations)return;
+  const rows=await Auth.listConfirmations();
+  (rows||[]).forEach(r=>{SITE_CONF[`${r.unit||''}|${r.serial||''}`]=r});
+}
+const statusTone=e=>{
+  if(siteConfirmed(e))return 'green';
+  if(markedNotMine(e)||awaitingConfirm(e)||e.Status==='NOT CONFIRMED'||atIntellirent(e))return 'amber';
+  return e.Status==='MISSING'?'red':'green';
+};
+const statusLabel=e=>{
+  if(siteConfirmed(e))return 'Confirmed on site';
+  if(markedNotMine(e))return 'Marked as not mine';
+  if(atIntellirent(e))return e.Status;
+  const lab=e['Status label']||'';
+  if(/^AT OFFICE\b/i.test(lab))return lab.replace(/^AT OFFICE/i,'At office');
+  return e.Status!=='CONFIRMED'&&lab?lab:(e.Status==='MISSING'?'Missing':e.Status==='NOT CONFIRMED'?'Not confirmed':'Confirmed');
+};
 const who=n=>{const label=placeLabel(n),c=pColor(n);return c?`<span class="who" style="--pc:${c}">${esc(label)}</span>`:esc(label||'')};
 /* Cal tag: tracker field first; else nearest Jan/May/Sep cycle from the cal date month (marked est.) */
 const TAGM={1:'JAN',2:'JAN',12:'JAN',11:'JAN',4:'MAY',5:'MAY',6:'MAY',3:'MAY',8:'SEP',9:'SEP',10:'SEP',7:'SEP'};
@@ -407,7 +430,11 @@ const V={
   if(!visible.some(p=>p.name===st.person))st.person=defaultPerson;
   if(visible.length>1){
     const sw=document.createElement('div');sw.className='me-people';
-    sw.innerHTML=visible.map(p=>`<button type="button" class="${p.name===st.person?'on':''}" data-p="${esc(p.name)}">${esc(p.name)} <small>${p.units.length}</small></button>`).join('');
+    sw.innerHTML=visible.map(p=>{
+      const unc=p.units.filter(awaitingConfirm).length;
+      const badge=(Auth.isAdmin&&unc)?`<span class="me-unc">Unconfirmed ${unc}</span>`:'';
+      return `<button type="button" class="${p.name===st.person?'on':''}" data-p="${esc(p.name)}">${esc(p.name)} <small>${p.units.length}</small>${badge}</button>`;
+    }).join('');
     sw.querySelectorAll('button').forEach(b=>b.onclick=()=>{state.myeq.person=b.dataset.p;render()});
     app.append(sw);
   }
@@ -418,37 +445,64 @@ const V={
     return;
   }
   p.units=[...p.units].sort((a,b)=>(a._d.n??9e9)-(b._d.n??9e9));
-  const n=p.units.length, missing=p.units.filter(e=>!e['Cert PDF']).length, recals=p.units.filter(needsRecal).length;
-  kpis([[n,'confirmed unit'+(n===1?'':'s'),false],[missing,'cert not on file',!!missing],[recals,'needs recal',!!recals]]);
+  const n=p.units.length, missing=p.units.filter(e=>!e['Cert PDF']).length, recals=p.units.filter(needsRecal).length, unc=p.units.filter(awaitingConfirm).length;
+  kpis([[n,'unit'+(n===1?'':'s'),false],[unc,'unconfirmed',!!unc],[missing,'cert not on file',!!missing],[recals,'needs recal',!!recals]]);
+  if(Auth.isAdmin&&unc){
+    app.insertAdjacentHTML('beforeend', `<p class="s"><span class="me-unc">Unconfirmed</span> ${unc} unit${unc===1?'':'s'} on this list still need a confirmation.</p>`);
+  }
+  const canAct=!!(myTechName()&&p.name===myTechName()&&!p.location);
   const list=document.createElement('div');list.className='me-list';
   list.innerHTML=p.units.map((e,i)=>{
     const d=e._d, s=soonInfo(e), tag=tagHTML(tagOf(e).t)||tagDot(e);
-    const cert=e['Cert PDF']?`<div class="me-cert">Tap to open current cal cert</div>`:`<div class="me-cert missing">Cert not on file</div>`;
+    const pending=awaitingConfirm(e), notMine=markedNotMine(e);
     const typo=e['Cert note']?`<div class="me-cert-note">${esc(e['Cert note'])}</div>`:'';
     const dueCls=s?(s.n<=14?'over':'soon'):d.k;
     const atCal=atIntellirent(e)?`<div class="me-status">${esc(e.Status)}</div>`:'';
-    return `<button type="button" class="me-card${needsRecal(e)?' needs-recal':''}${s?' soon-card '+s.k:''}${atIntellirent(e)?' at-cal':''}" data-i="${i}">
-      <div class="me-top"><b>${esc(descOf(e)||e.Model||e.Unit||'')}</b> ${recalBadge(e)}</div>
+    const siteNote=siteConfirmed(e)?`<div class="me-site-note">Confirmed on site</div>`:notMine?`<div class="me-site-note">Marked as not mine</div>`:'';
+    const cert=e['Cert PDF']
+      ?(pending||notMine?`<div class="me-cert"><button type="button" class="sec sm me-open-cert" data-i="${i}">Open cal cert</button></div>`:`<div class="me-cert">Tap to open current cal cert</div>`)
+      :`<div class="me-cert missing">Cert not on file</div>`;
+    let actions='';
+    if(canAct&&(pending||notMine)){
+      actions=`<div class="me-actions"><button type="button" class="sec me-confirm" data-i="${i}" data-act="confirmed">Confirm I have this</button>`
+        +(notMine&&!pending?'':`<button type="button" class="sec me-confirm" data-i="${i}" data-act="not_mine">I don't have this</button>`)
+        +`</div>`;
+    }
+    const cls=`me-card${needsRecal(e)?' needs-recal':''}${s?' soon-card '+s.k:''}${atIntellirent(e)?' at-cal':''}${pending||notMine?' unconfirmed':''}`;
+    const inner=`<div class="me-top"><b>${esc(descOf(e)||e.Model||e.Unit||'')}</b> ${recalBadge(e)}${pending?`<span class="me-unc">Unconfirmed</span>`:''}</div>
       ${atCal}
       <div class="me-meta">${assetOf(e)?`<span class="me-asset">${esc(assetOf(e))}</span>`:''}${serialOf(e)?`<span>S/N ${esc(serialOf(e))}</span>`:''}
-        <span>Cal ${e['Cal date']?esc(fD(e['Cal date'])):'—'}</span>
-        <span>Due ${noCal(e)?'—':(e['Due date']?`<span class="due ${dueCls}">${esc(fD(e['Due date']))}</span>`:'—')}</span>
-        ${s?soonHTML(s):''} ${tag}</div>${cert}${typo}</button>`;
+        <span>Cal ${e['Cal date']?esc(fD(e['Cal date'])):'\u2014'}</span>
+        <span>Due ${noCal(e)?'\u2014':(e['Due date']?`<span class="due ${dueCls}">${esc(fD(e['Due date']))}</span>`:'\u2014')}</span>
+        ${s?soonHTML(s):''} ${tag}</div>${cert}${typo}${siteNote}${actions}`;
+    if(pending||notMine) return `<div class="${cls}" data-i="${i}">${inner}</div>`;
+    return `<button type="button" class="${cls}" data-i="${i}">${inner}</button>`;
   }).join('');
-  list.querySelectorAll('.me-card').forEach(btn=>btn.onclick=async()=>{
-    const e=p.units[+btn.dataset.i];
+  const openCert=async(e)=>{
     if(!e['Cert PDF']){toast('Cert not on file');return}
     if(!Auth.live||!Auth.certUrl){toast('Open the live site while signed in to view certs.');return}
     try{
       const u=await Auth.certUrl(e['Cert PDF']);
       window.open(u,'_blank','noopener');
     }catch(err){toast(err.message||'Could not open cert')}
+  };
+  list.querySelectorAll('button.me-card').forEach(btn=>btn.onclick=()=>openCert(p.units[+btn.dataset.i]));
+  list.querySelectorAll('.me-open-cert').forEach(btn=>btn.onclick=ev=>{ev.preventDefault();ev.stopPropagation();openCert(p.units[+btn.dataset.i])});
+  list.querySelectorAll('.me-confirm').forEach(btn=>btn.onclick=async ev=>{
+    ev.preventDefault();ev.stopPropagation();
+    const e=p.units[+btn.dataset.i];
+    try{
+      await Auth.addConfirmation({unit:e.Unit,serial:e.Serial||'',tech_name:myTechName(),status:btn.dataset.act});
+      await refreshConfirmations();
+      render();
+    }catch(err){toast(err.message||'Could not save confirmation')}
   });
   app.append(list);
+
  },
  equipment(){head('Equipment');
   const E=D.equipment.map(e=>({...e,_d:dueInfo(e)}));const c=f=>E.filter(f).length;
-  kpis([[E.length,'units'],[c(e=>e.Status==='MISSING'),'missing',1],[c(e=>e.Status==='NOT CONFIRMED'),'assigned, not confirmed',1],[c(e=>e._d.k==='over'||e._d.k==='recal'),'cal overdue',1],[c(e=>e._d.k==='soon'),'due within 30 days'],[c(needsRecal),'needs recal',c(needsRecal)]]);
+  kpis([[E.length,'units'],[c(e=>e.Status==='MISSING'&&!siteConfirmed(e)),'missing',1],[c(e=>awaitingConfirm(e)),'unconfirmed',1],[c(e=>e._d.k==='over'||e._d.k==='recal'),'cal overdue',1],[c(e=>e._d.k==='soon'),'due within 30 days'],[c(needsRecal),'needs recal',c(needsRecal)]]);
   dataExportBar(exportEquipmentCsv);
   const dl=e=>({over:'Overdue',soon:'Due soon',ok:'OK',nodate:'No date',nocal:'No cal required',recal:'Needs recal'})[e._d.k];
   app.append(quickDue('equipment',E));app.append(legend(E.map(e=>e.Holder)));
@@ -716,7 +770,7 @@ document.getElementById('gq').addEventListener('input',e=>{if(techOnly())return;
 document.getElementById('gq').addEventListener('keydown',e=>{if(techOnly())return;if(e.key==='Enter'){tab='search';render()}});
 let rz;window.addEventListener('resize',()=>{clearTimeout(rz);const w=narrow();rz=setTimeout(()=>{if(w!==window._nw){window._nw=w;if(D)render()}},200)});
 
-(async()=>{D=await Auth.start();if(Auth.live){await Promise.all([Auth.colors().then(r=>{if(r.length)setPersonColors(r)}).catch(()=>{}),loadPdfIndex()])}prep();window._nw=narrow();document.getElementById('who').innerHTML=Auth.live?`<button class="sec sm" onclick="Auth.signOut()">Sign out</button>`:'';if(!(location.hash||'').slice(1)){tab='myeq';location.hash='myeq'}document.body.classList.toggle('tech-only',techOnly());render();fromHash();
+(async()=>{D=await Auth.start();if(Auth.live){await Promise.all([Auth.colors().then(r=>{if(r.length)setPersonColors(r)}).catch(()=>{}),loadPdfIndex(),refreshConfirmations().catch(()=>{})])}prep();window._nw=narrow();document.getElementById('who').innerHTML=Auth.live?`<button class="sec sm" onclick="Auth.signOut()">Sign out</button>`:'';if(!(location.hash||'').slice(1)){tab='myeq';location.hash='myeq'}document.body.classList.toggle('tech-only',techOnly());render();fromHash();
  setInterval(()=>{if(tab==='rentals'&&document.getElementById('panel').hidden&&!document.activeElement.matches('input,select')){prep();render()}},6*3600e3)})();
 window.addEventListener('hashchange',()=>{if(!D)return;if(fromHash())return;closePanel();const t=location.hash.slice(1);if(t&&!/=/.test(t)&&t!==tab){tab=t;render()}});
 window.addEventListener('popstate',()=>{if(!D)return;if(!/^#(order|unit|rental|job)=/.test(location.hash)){const p=document.getElementById('panel');if(!p.hidden){p.hidden=true;p.innerHTML='';document.body.classList.remove('noscroll')}}else fromHash()});

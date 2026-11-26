@@ -72,5 +72,17 @@ const Auth=(()=>{
   if(role!=='admin')return null;
   const {data,error}=await sb.from('admin_spend').select('data,built_at').eq('id','current').maybeSingle();
   if(error)throw error;return data?data.data:null}
- return {start,signOut,admin,changePw,pdfUrl,certUrl,colors,saveColor,delColor,pdfList,pdfUpload,adminSpend,get live(){return live},get role(){return role},get email(){return email},get isAdmin(){return role==='admin'}};
+
+ /* Site confirmations for assigned units (table equipment_confirmations). Does not edit the tracker xlsx. */
+ async function listConfirmations(){
+  if(!sb)return [];
+  const {data,error}=await sb.from('equipment_confirmation_latest').select('unit,serial,tech_name,status,confirmed_at');
+  if(error)throw error;
+  return data||[]}
+ async function addConfirmation({unit,serial,tech_name,status}){
+  if(!sb)throw new Error('Open the live site while signed in.');
+  if(status!=='confirmed'&&status!=='not_mine')throw new Error('Invalid confirmation');
+  const {error}=await sb.from('equipment_confirmations').insert({unit,serial:serial||'',tech_name,status});
+  if(error)throw error}
+ return {start,signOut,admin,changePw,pdfUrl,certUrl,colors,saveColor,delColor,pdfList,pdfUpload,adminSpend,listConfirmations,addConfirmation,get live(){return live},get role(){return role},get email(){return email},get isAdmin(){return role==='admin'}};
 })();
